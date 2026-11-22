@@ -1,0 +1,17 @@
+# ESP-IDF build output
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/dependencies.lock
+
+# Python
+__pycache__/
+*.pyc
+
+# Host tooling
+.vscode/
+.idea/
+.DS_Store
+
+# Local captures that are not part of the release
+*.tmp

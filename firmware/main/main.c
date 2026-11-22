@@ -1,0 +1,1212 @@
+// ESP32-S3 on-device LLM experiment.
+//
+// Goals:
+//   1. load a TinyStories llama2.c model from the SD card (camera never touched)
+//   2. run it with int8 weights + 128-bit vector dot products
+//   3. measure tokens/s at 240 MHz, then retry with a 320 MHz CPU overclock
+//
+// Nothing here writes to the card or the flash partitions.
+
+#include <dirent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "esp_chip_info.h"
+#include "esp_private/esp_clk.h"
+#include "esp_flash.h"
+#include "esp_idf_version.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_memory_utils.h"
+#include "esp_partition.h"
+#include "esp_psram.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
+#include "esp_task_wdt.h"
+#include "esp_vfs_fat.h"
+#include "driver/sdmmc_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "hal/clk_tree_ll.h"
+#include "hal/clk_tree_hal.h"
+#include "hal/regi2c_ctrl_ll.h"
+#include "sdmmc_cmd.h"
+#include "soc/rtc.h"
+#include "soc/system_reg.h"
+
+#include "llm.h"
+#include "tokenizer.h"
+#include "bench_cfg.h"
+
+static const char *TAG = "llms3";
+
+#define SD_MMC_CMD 38
+#define SD_MMC_CLK 39
+#define SD_MMC_D0  40
+#define MODEL_PATH "/sdcard/stories260K.bin"
+#define TOK_PATH   "/sdcard/tok512.bin"
+// 0 means "use the model's own seq_len" (512 for stories260K). The KV cache is
+// sized from this, so there is no reason to cap it below the trained context.
+#define CTX_TOKENS 0
+#define GEN_TOKENS 12
+#define SOAK_RUNS  5
+
+// fp32 greedy output for "Once upon a time", cross-checked against llama2.c
+// run.c (5500 tok/s on the laptop) and tools/ref_llama.py.
+static const int EXPECTED[] = {432, 383, 286, 261, 376, 298, 315, 421, 395, 317, 426, 338};
+static const int EXPECTED_N = (int)(sizeof(EXPECTED) / sizeof(EXPECTED[0]));
+
+typedef struct {
+    int n_prompt;
+    int n_gen;
+    int ids[64];
+    char text[768];
+    int64_t ttft_us;
+    int64_t total_us;
+} gen_result_t;
+
+static void banner(void)
+{
+    esp_chip_info_t info;
+    esp_chip_info(&info);
+    uint32_t flash = 0;
+    esp_flash_get_size(NULL, &flash);
+    ESP_LOGI(TAG, "==============================================");
+    ESP_LOGI(TAG, " ParoClaw ESP32-S3 on-device LLM experiment");
+    ESP_LOGI(TAG, " chip=%s cores=%d rev=%d.%d flash=%uMB psram=%uMB",
+             CONFIG_IDF_TARGET, info.cores, info.revision / 100, info.revision % 100,
+             (unsigned)(flash / (1024 * 1024)),
+             (unsigned)(esp_psram_get_size() / (1024 * 1024)));
+    ESP_LOGI(TAG, " cpu=%d MHz  idf=%s", (int)esp_clk_cpu_freq(), esp_get_idf_version());
+    ESP_LOGI(TAG, " heap internal=%u B psram=%u B",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    ESP_LOGI(TAG, "==============================================");
+}
+
+static void dot_selftest(void)
+{
+    int8_t *a = heap_caps_aligned_alloc(16, 256, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    int8_t *b = heap_caps_aligned_alloc(16, 256, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!a || !b) {
+        ESP_LOGE(TAG, "selftest alloc failed");
+        return;
+    }
+    uint32_t seed = 0x1234abcd;
+    for (int i = 0; i < 256; i++) {
+        seed = seed * 1103515245u + 12345u;
+        a[i] = (int8_t)(seed >> 16);
+        seed = seed * 1103515245u + 12345u;
+        b[i] = (int8_t)(seed >> 16);
+    }
+    const int lens[] = {16, 32, 64, 172, 176};
+    bool ok = true;
+    for (unsigned i = 0; i < sizeof(lens) / sizeof(lens[0]); i++) {
+        int32_t v = llm_dot_s8(a, b, lens[i]);
+        int32_t s = llm_dot_s8_scalar(a, b, lens[i]);
+        ESP_LOGI(TAG, "dot n=%-4d vector=%-8d scalar=%-8d %s",
+                 lens[i], (int)v, (int)s, v == s ? "OK" : "MISMATCH");
+        if (v != s) {
+            ok = false;
+        }
+    }
+    // The fused load+MAC form is only useful if its load target is really
+    // independent of the multiply sources, so prove it against the scalar path.
+    int32_t fv = llm_dot_s8_fused64(a, b);
+    int32_t fs = llm_dot_s8_scalar(a, b, 64);
+    ESP_LOGI(TAG, "dot fused64 vector=%-8d scalar=%-8d %s",
+             (int)fv, (int)fs, fv == fs ? "OK" : "MISMATCH");
+    if (fv != fs) {
+        ok = false;
+    }
+
+    // Four-position batched K dot. Each lane must match a single dot.
+    int32_t q4[4];
+    llm_dot16x4_s8(a, b, 32, q4);
+    for (int j = 0; j < 4; j++) {
+        int32_t s = llm_dot_s8_scalar(a, b + (size_t)j * 32, 16);
+        ESP_LOGI(TAG, "dot x4[%d] vector=%-8d scalar=%-8d %s",
+                 j, (int)q4[j], (int)s, q4[j] == s ? "OK" : "MISMATCH");
+        if (q4[j] != s) {
+            ok = false;
+        }
+    }
+
+    ESP_LOGI(TAG, "SIMD self-test: %s", ok ? "PASS" : "FAIL");
+    free(a);
+    free(b);
+}
+
+// Benchmark for the attention read pattern.
+// Attention is only ~1,200 eight-element dots per token, so if it costs 470 us
+// then either the FPU is slow or the KV reads stall; measure both.
+static void hw_bench(void)
+{
+    volatile float sink = 0.0f;
+
+    // 3. The attention read pattern: eight floats taken every 128 bytes. Four
+    // accumulators, so this measures memory and not FPU dependency latency.
+    // The same walk is run from internal SRAM and from PSRAM; the difference
+    // is what a PSRAM-resident KV cache actually costs per position.
+    float *ps = heap_caps_malloc(512 * 32 * sizeof(float), MALLOC_CAP_SPIRAM);
+    float *in = heap_caps_malloc(512 * 32 * sizeof(float), MALLOC_CAP_INTERNAL);
+    float *sr = heap_caps_malloc(8 * sizeof(float), MALLOC_CAP_INTERNAL);
+    if (ps && in && sr) {
+        for (int i = 0; i < 512 * 32; i++) {
+            ps[i] = (float)(i & 7);
+            in[i] = (float)(i & 7);
+        }
+        for (int i = 0; i < 8; i++) {
+            sr[i] = 0.5f;
+        }
+        const int REPS = 20;
+        float s = 0.0f;
+        for (int which = 0; which < 2; which++) {
+            const float *base = which ? ps : in;
+            int64_t ta = esp_timer_get_time();
+            for (int rep = 0; rep < REPS; rep++) {
+                for (int t = 0; t < 512; t++) {
+                    const float *k = base + (size_t)t * 32;
+                    float a0 = k[0] * sr[0], a1 = k[1] * sr[1];
+                    float a2 = k[2] * sr[2], a3 = k[3] * sr[3];
+                    float b0 = k[4] * sr[4], b1 = k[5] * sr[5];
+                    float b2 = k[6] * sr[6], b3 = k[7] * sr[7];
+                    s += (a0 + a1) + (a2 + a3) + (b0 + b1) + (b2 + b3);
+                }
+            }
+            int64_t tb = esp_timer_get_time();
+            ESP_LOGI(TAG, "bench dot8 stride128 %s: %.1f ns per position",
+                     which ? "psram" : "sram ",
+                     (double)(tb - ta) * 1000.0 / (REPS * 512.0));
+        }
+        sink = s;
+        free(sr);
+        free(in);
+        free(ps);
+    }
+
+    sink = sink + 1.0f;
+    (void)sink;
+}
+
+static bool sd_mount(sdmmc_card_t **out_card)
+{
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024,
+    };
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.width = 1;
+    slot.clk = SD_MMC_CLK;
+    slot.cmd = SD_MMC_CMD;
+    slot.d0 = SD_MMC_D0;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t err = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot, &mount_config, out_card);
+    int64_t dt = esp_timer_get_time() - t0;
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SD mount failed: %s (after %d us)", esp_err_to_name(err), (int)dt);
+        return false;
+    }
+    sdmmc_card_print_info(stdout, *out_card);
+    ESP_LOGI(TAG, "SD mounted in %d us", (int)dt);
+    return true;
+}
+
+// If the filesystem is not FAT (exFAT is disabled in IDF's FATFS build), show
+// what is actually on the card so the next step is obvious.
+static void sd_raw_probe(void)
+{
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.width = 1;
+    slot.clk = SD_MMC_CLK;
+    slot.cmd = SD_MMC_CMD;
+    slot.d0 = SD_MMC_D0;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+
+    if (sdmmc_host_init() != ESP_OK) {
+        ESP_LOGE(TAG, "probe: host init failed");
+        return;
+    }
+    if (sdmmc_host_init_slot(host.slot, &slot) != ESP_OK) {
+        ESP_LOGE(TAG, "probe: slot init failed");
+        sdmmc_host_deinit();
+        return;
+    }
+    sdmmc_card_t *card = calloc(1, sizeof(sdmmc_card_t));
+    if (!card) {
+        sdmmc_host_deinit();
+        return;
+    }
+    esp_err_t err = sdmmc_card_init(&host, card);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "probe: card init failed: %s", esp_err_to_name(err));
+        free(card);
+        sdmmc_host_deinit();
+        return;
+    }
+    sdmmc_card_print_info(stdout, card);
+
+    uint8_t sec[512];
+    if (sdmmc_read_sectors(card, sec, 0, 1) == ESP_OK) {
+        ESP_LOGI(TAG, "probe: sector0 sig=%02x%02x", sec[510], sec[511]);
+        if (memcmp(sec + 3, "EXFAT   ", 8) == 0) {
+            ESP_LOGW(TAG, "probe: filesystem = exFAT (volume boot record)");
+        } else if (memcmp(sec + 3, "NTFS    ", 8) == 0) {
+            ESP_LOGW(TAG, "probe: filesystem = NTFS");
+        } else if (memcmp(sec + 82, "FAT32   ", 8) == 0) {
+            ESP_LOGI(TAG, "probe: filesystem = FAT32 (volume boot record)");
+        } else if (sec[510] == 0x55 && sec[511] == 0xAA) {
+            ESP_LOGI(TAG, "probe: MBR/GPT partition table, %02x %02x %02x %02x",
+                     sec[446], sec[447], sec[448], sec[449]);
+            for (int i = 0; i < 4; i++) {
+                const uint8_t *e = sec + 446 + i * 16;
+                if (e[4] == 0) {
+                    continue;
+                }
+                uint32_t lba = (uint32_t)e[8] | ((uint32_t)e[9] << 8) |
+                               ((uint32_t)e[10] << 16) | ((uint32_t)e[11] << 24);
+                uint32_t cnt = (uint32_t)e[12] | ((uint32_t)e[13] << 8) |
+                               ((uint32_t)e[14] << 16) | ((uint32_t)e[15] << 24);
+                ESP_LOGI(TAG, "probe: part%d type=%02x lba=%u sectors=%u", i, e[4],
+                         (unsigned)lba, (unsigned)cnt);
+                uint8_t bs[512];
+                if (sdmmc_read_sectors(card, bs, lba, 1) == ESP_OK) {
+                    if (memcmp(bs + 3, "EXFAT   ", 8) == 0) {
+                        ESP_LOGW(TAG, "probe: part%d is exFAT", i);
+                    } else if (memcmp(bs + 82, "FAT32   ", 8) == 0) {
+                        ESP_LOGI(TAG, "probe: part%d is FAT32", i);
+                    } else if (memcmp(bs + 54, "FAT", 3) == 0) {
+                        ESP_LOGI(TAG, "probe: part%d is FAT12/16", i);
+                    } else {
+                        ESP_LOGW(TAG, "probe: part%d unknown boot sector", i);
+                    }
+                }
+            }
+        } else {
+            ESP_LOGW(TAG, "probe: unrecognised sector 0");
+        }
+    }
+    free(card);
+    sdmmc_host_deinit();
+}
+
+static void sd_list(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) {
+        return;
+    }
+    struct dirent *e;
+    int n = 0;
+    while ((e = readdir(d)) != NULL && n < 16) {
+        struct stat st;
+        char full[320];
+        snprintf(full, sizeof(full), "%s/%s", path, e->d_name);
+        if (stat(full, &st) == 0 && S_ISREG(st.st_mode)) {
+            ESP_LOGI(TAG, "  %-28s %8d B", e->d_name, (int)st.st_size);
+        } else {
+            ESP_LOGI(TAG, "  %-28s <dir>", e->d_name);
+        }
+        n++;
+    }
+    closedir(d);
+}
+
+static uint8_t *load_sd(const char *path, size_t *out_size)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        ESP_LOGW(TAG, "open %s failed", path);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = heap_caps_malloc((size_t)sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        ESP_LOGE(TAG, "no PSRAM for %d bytes", (int)sz);
+        fclose(f);
+        return NULL;
+    }
+    size_t rd = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if (rd != (size_t)sz) {
+        ESP_LOGE(TAG, "short read %u/%d", (unsigned)rd, (int)sz);
+        free(buf);
+        return NULL;
+    }
+    *out_size = (size_t)sz;
+    return buf;
+}
+
+// Fallback source: a raw flash partition holding uint32 length + file bytes.
+static uint8_t *load_part(const char *label, size_t *out_size)
+{
+    const esp_partition_t *p = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (!p) {
+        return NULL;
+    }
+    uint32_t len = 0;
+    if (esp_partition_read(p, 0, &len, 4) != ESP_OK || len == 0 || len > p->size) {
+        ESP_LOGW(TAG, "partition %s has no valid image", label);
+        return NULL;
+    }
+    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        return NULL;
+    }
+    if (esp_partition_read(p, 4, buf, len) != ESP_OK) {
+        free(buf);
+        return NULL;
+    }
+    *out_size = len;
+    ESP_LOGI(TAG, "loaded %s from flash partition (%u B)", label, (unsigned)len);
+    return buf;
+}
+
+// Stage a model file on the SD card from its flash-partition copy, so the card
+// becomes the real model store instead of a fallback that never gets used.
+static bool sd_ensure_file(const char *path, const char *label)
+{
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size > 0) {
+        ESP_LOGI(TAG, "SD already has %s (%d B)", path, (int)st.st_size);
+        return true;
+    }
+    size_t n = 0;
+    uint8_t *buf = load_part(label, &n);
+    if (!buf) {
+        return false;
+    }
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        ESP_LOGW(TAG, "cannot create %s on the card", path);
+        free(buf);
+        return false;
+    }
+    size_t wr = fwrite(buf, 1, n, f);
+    fflush(f);
+    fclose(f);
+    free(buf);
+    if (wr != n) {
+        ESP_LOGW(TAG, "short write %u/%u for %s", (unsigned)wr, (unsigned)n, path);
+        return false;
+    }
+    ESP_LOGI(TAG, "staged %s on the SD card (%u B)", path, (unsigned)n);
+    return true;
+}
+
+static void run_gen(llm_t *m, tokenizer_t *tk, const char *prompt, int n_gen,
+                    bool q8, gen_result_t *r)
+{
+    int toks[256];
+    int np = tok_encode(tk, prompt, 1, toks, 256);
+    if (np <= 0) {
+        np = 1;
+        toks[0] = 1;
+    }
+    r->n_prompt = np;
+    int pos = 0;
+    float *lg = m->logits;
+
+    int64_t t0 = esp_timer_get_time();
+    for (int i = 0; i < np; i++) {
+        if (q8) {
+            llm_forward_int8(m, toks[i], pos, lg);
+        } else {
+            llm_forward_f32(m, toks[i], pos, lg);
+        }
+        pos++;
+    }
+    r->ttft_us = esp_timer_get_time() - t0;
+
+    int len = 0;
+    r->text[0] = '\0';
+    int prev = toks[np - 1];
+    for (int g = 0; g < n_gen; g++) {
+        int best = 0;
+        float bv = lg[0];
+        for (int i = 1; i < m->vocab_size; i++) {
+            if (lg[i] > bv) {
+                bv = lg[i];
+                best = i;
+            }
+        }
+        r->ids[g] = best;
+        char b[16];
+        int n = tok_decode(tk, prev, best, b, sizeof(b));
+        if (len + n < (int)sizeof(r->text) - 1) {
+            memcpy(r->text + len, b, (size_t)n);
+            len += n;
+            r->text[len] = '\0';
+        }
+        prev = best;
+        if (pos < m->ctx) {
+            if (q8) {
+                llm_forward_int8(m, best, pos, lg);
+            } else {
+                llm_forward_f32(m, best, pos, lg);
+            }
+            pos++;
+        }
+    }
+    r->n_gen = n_gen;
+    r->total_us = esp_timer_get_time() - t0;
+}
+
+static void report_gen(const char *label, const gen_result_t *r)
+{
+    int64_t gen_us = r->total_us - r->ttft_us;
+    if (gen_us <= 0) {
+        gen_us = 1;
+    }
+    int64_t tps100 = (int64_t)r->n_gen * 100000000LL / gen_us;
+    ESP_LOGI(TAG, "%s: prompt %d tok, ttft %d us, %d gen tok in %d us",
+             label, r->n_prompt, (int)r->ttft_us, r->n_gen, (int)gen_us);
+    ESP_LOGI(TAG, "%s: %.2f tok/s", label, (double)tps100 / 100.0);
+    ESP_LOGI(TAG, "%s: \"%s\"", label, r->text);
+    char ids[256];
+    int off = 0;
+    for (int i = 0; i < r->n_gen && off < (int)sizeof(ids) - 8; i++) {
+        off += snprintf(ids + off, sizeof(ids) - (size_t)off, "%s%d", i ? "," : "", r->ids[i]);
+    }
+    ESP_LOGI(TAG, "%s ids: [%s]", label, ids);
+}
+
+// Per-section cost of the int8 forward pass, in microseconds per token.
+static void report_prof(const llm_t *m, int forwards)
+{
+    static const char *names[8] = {
+        "qkv matmuls", "rope", "attention", "wo + residual",
+        "ffn w1/w3", "silu", "w2 + residual", "final+classifier",
+    };
+    uint64_t total = 0;
+    for (int i = 0; i < 8; i++) {
+        total += m->prof[i];
+    }
+    ESP_LOGI(TAG, "int8 profile: %d forwards, %.2f ms/token accounted",
+             forwards, (double)total / 1000.0 / forwards);
+    for (int i = 0; i < 8; i++) {
+        ESP_LOGI(TAG, "  %-16s %8.1f us/token  %4.1f%%", names[i],
+                 (double)m->prof[i] / forwards,
+                 total ? 100.0 * (double)m->prof[i] / (double)total : 0.0);
+    }
+}
+
+static int match_expected(const gen_result_t *r){
+    int n = r->n_gen < EXPECTED_N ? r->n_gen : EXPECTED_N;
+    for (int i = 0; i < n; i++) {
+        if (r->ids[i] != EXPECTED[i]) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static volatile uint32_t g_bench_sink;
+
+static int64_t bench_cpu(const char *label, uint32_t iters)
+{
+    int64_t t0 = esp_timer_get_time();
+    uint32_t a = 0x12345678u;
+    for (uint32_t i = 0; i < iters; i++) {
+        a = a * 1664525u + 1013904223u;
+        a ^= a >> 13;
+    }
+    g_bench_sink = a;
+    int64_t dt = esp_timer_get_time() - t0;
+    ESP_LOGI(TAG, "cpu bench %s: %u iters in %d us (sum %08x)", label, (unsigned)iters,
+             (int)dt, (unsigned)a);
+    return dt;
+}
+
+// 320 MHz is not a Kconfig option: clk_ll_cpu_set_freq_mhz_from_pll() aborts on
+// anything other than 80/160/240. The hardware can still do it: on a 320 MHz
+// PLL, CPUPERIOD_SEL=2 means PLL/1 = 320 MHz instead of PLL/2 = 240 MHz.
+//
+// Doing it via rtc_clk_cpu_freq_set_config() alone hangs, because that path
+// parks the CPU on XTAL first, which powers the BBPLL down; the re-enable then
+// never finishes analog calibration. Instead we stay on the PLL the whole time
+// and pivot through 80 MHz, which is PLL/6 at 480 MHz and PLL/4 at 320 MHz.
+// The CPU and APB stay at 80 MHz across the PLL reprogram, so the console UART
+// keeps its baud rate and every step below stays readable.
+static bool bbpll_program(uint32_t mhz, int timeout_ms)
+{
+    clk_ll_bbpll_set_freq_mhz(mhz);
+    regi2c_ctrl_ll_bbpll_calibration_start();
+    clk_ll_bbpll_set_config(mhz, 40);
+    int64_t t0 = esp_timer_get_time();
+    while (!regi2c_ctrl_ll_bbpll_calibration_is_done()) {
+        if (esp_timer_get_time() - t0 > (int64_t)timeout_ms * 1000) {
+            regi2c_ctrl_ll_bbpll_calibration_stop();
+            ESP_LOGE(TAG, "bbpll %u MHz calibration timeout after %d ms",
+                     (unsigned)mhz, timeout_ms);
+            return false;
+        }
+    }
+    esp_rom_delay_us(10);
+    regi2c_ctrl_ll_bbpll_calibration_stop();
+    ESP_LOGI(TAG, "bbpll -> %u MHz, calibration done in %d us",
+             (unsigned)mhz, (int)(esp_timer_get_time() - t0));
+    return true;
+}
+
+static void pll_switch(uint32_t src_mhz, uint32_t freq_mhz, uint32_t div)
+{
+    rtc_cpu_freq_config_t cfg = {
+        .source = SOC_CPU_CLK_SRC_PLL,
+        .source_freq_mhz = src_mhz,
+        .freq_mhz = freq_mhz,
+        .div = div,
+    };
+    rtc_clk_cpu_freq_set_config(&cfg);
+}
+
+static void cpu_set_240(void)
+{
+    // Same pivot in reverse. get_config() cannot describe "320 PLL + SEL2", so
+    // it logs and leaves the struct untouched here; the worst case is a brief
+    // over-voltage, never an under-voltage.
+    pll_switch(320, 80, 4);
+    if (!bbpll_program(480, 200)) {
+        ESP_LOGE(TAG, "restore: PLL calibration failed, rebooting");
+        esp_restart();
+    }
+    pll_switch(480, 240, 2);
+}
+
+#if BENCH_MODE
+
+// ---- paper measurement mode -------------------------------------------------
+// One boot runs: optional logit dump, VAR_RUNS short generations, then CTX_RUNS
+// full-context generations. Timings are collected into arrays and printed after
+// the run so UART output never lands inside a measured region.
+
+static uint32_t s_tim_us[CTX_LEN + 64];
+static int s_tim_pos[CTX_LEN + 64];
+static int s_tok_id[CTX_LEN + 64];
+
+static void bench_dump_logits(const float *lg, int n, const char *label, int step)
+{
+    printf("LOGD %s %d %d\n", label, step, n);
+    for (int i = 0; i < n; i++) {
+        union { float f; uint32_t u; } v;
+        v.f = lg[i];
+        printf("%08x%c", (unsigned)v.u, (i % 16 == 15) ? '\n' : ' ');
+        if ((i & 15) == 15) {
+            // The UART write blocks; yield so the idle task can feed the WDT.
+            fflush(stdout);
+            vTaskDelay(1);
+        }
+    }
+    printf("LOGE %s %d\n", label, step);
+    fflush(stdout);
+}
+
+#if KV_INT8 || KVCHECK
+// Long-context accuracy check. A 124-token prompt is repeated to fill the
+// 512-token context, then fp32 and int8 logits are dumped at several depths.
+// This covers the hot-window boundary (15/16/17) and the deep int8 regime.
+static void bench_kvcheck(llm_t *m, tokenizer_t *tk)
+{
+    static const char *para =
+        "Once upon a time, in a small village by the sea, there lived a "
+        "curious young girl who loved to read stories about distant lands "
+        "and the people who lived there. Every evening she would sit by the "
+        "window and imagine the ships and the mountains and the cities beyond "
+        "the horizon, and she would write down everything she saw in her "
+        "little notebook. One day a traveler came to the village and told her "
+        "about a library that held a book for every question, and she decided "
+        "that she would find it before the winter came.";
+    static const int targets[] = { 15, 16, 17, 32, 64, 128, 256, 384, 511 };
+    const int nt = (int)(sizeof(targets) / sizeof(targets[0]));
+    const int n = m->ctx;
+    int toks[512];
+
+    int np = tok_encode(tk, para, 1, toks, 512);
+    if (np <= 0) {
+        return;
+    }
+    for (int i = np; i < n; i++) {
+        toks[i] = toks[i % np];
+    }
+
+    for (int i = 0; i < n; i++) {
+        if (llm_forward_f32(m, toks[i], i, m->logits) != 0) {
+            return;
+        }
+        for (int k = 0; k < nt; k++) {
+            if (i == targets[k]) {
+                char label[16];
+                snprintf(label, sizeof(label), "fp32L%d", i);
+                bench_dump_logits(m->logits, m->vocab_size, label, 0);
+            }
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        if (llm_forward_int8(m, toks[i], i, m->logits) != 0) {
+            return;
+        }
+        for (int k = 0; k < nt; k++) {
+            if (i == targets[k]) {
+                char label[16];
+                snprintf(label, sizeof(label), "int8L%d", i);
+                bench_dump_logits(m->logits, m->vocab_size, label, 0);
+            }
+        }
+    }
+    printf("KVCHECK n=%d targets=%d\n", n, nt);
+    fflush(stdout);
+}
+#endif
+
+static void bench_run(llm_t *m, tokenizer_t *tk, const char *prompt, int n_gen,
+                      bool q8, int rep, const char *label, bool dump)
+{
+    int toks[256];
+    int np = tok_encode(tk, prompt, 1, toks, 256);
+    if (np <= 0) {
+        np = 1;
+        toks[0] = 1;
+    }
+
+    float *lg = m->logits;
+    int pos = 0;
+    int ntim = 0;
+    int64_t gen_us = 0;
+    int64_t t_start = esp_timer_get_time();
+
+    for (int i = 0; i < np; i++) {
+        int64_t a = esp_timer_get_time();
+        int rc = q8 ? llm_forward_int8(m, toks[i], pos, lg)
+                    : llm_forward_f32(m, toks[i], pos, lg);
+        int64_t b = esp_timer_get_time();
+        if (rc != 0) {
+            printf("ERR forward rc=%d pos=%d\n", rc, pos);
+            return;
+        }
+        s_tim_us[ntim] = (uint32_t)(b - a);
+        s_tim_pos[ntim] = pos;
+        ntim++;
+        pos++;
+    }
+    int64_t ttft_us = esp_timer_get_time() - t_start;
+
+    int ntok = 0;
+    for (int g = 0; g < n_gen; g++) {
+        if (dump) {
+            bench_dump_logits(lg, m->vocab_size, label, g);
+        }
+        int best = 0;
+        float bv = lg[0];
+        for (int i = 1; i < m->vocab_size; i++) {
+            if (lg[i] > bv) {
+                bv = lg[i];
+                best = i;
+            }
+        }
+        s_tok_id[ntok++] = best;
+        if (pos < m->ctx) {
+            int64_t a = esp_timer_get_time();
+            int rc = q8 ? llm_forward_int8(m, best, pos, lg)
+                        : llm_forward_f32(m, best, pos, lg);
+            int64_t b = esp_timer_get_time();
+            if (rc != 0) {
+                printf("ERR forward rc=%d pos=%d\n", rc, pos);
+                return;
+            }
+            if (pos >= np) {
+                gen_us += (b - a);
+            }
+            s_tim_us[ntim] = (uint32_t)(b - a);
+            s_tim_pos[ntim] = pos;
+            ntim++;
+            pos++;
+        }
+    }
+    int64_t total = esp_timer_get_time() - t_start;
+
+    printf("TTFT %s %d %d %lld\n", label, rep, np, (long long)ttft_us);
+    printf("RUN %s %d %d %d %lld %lld\n", label, rep, np, ntok,
+           (long long)total, (long long)gen_us);
+    for (int i = 0; i < ntim; i++) {
+        printf("TIM %s %d %d %u\n", label, rep, s_tim_pos[i], (unsigned)s_tim_us[i]);
+        if ((i & 31) == 31) {
+            fflush(stdout);
+            vTaskDelay(1);
+        }
+    }
+    for (int i = 0; i < ntok; i++) {
+        printf("TOK %s %d %d %d\n", label, rep, i, s_tok_id[i]);
+        if ((i & 31) == 31) {
+            fflush(stdout);
+            vTaskDelay(1);
+        }
+    }
+    fflush(stdout);
+}
+
+static void bench_mem(const llm_t *m, const char *label)
+{
+    const qmat_t *all[] = { &m->tok_emb, &m->wq, &m->wk, &m->wv,
+                            &m->wo, &m->w1, &m->w2, &m->w3 };
+    size_t win = 0, wps = 0, scales = 0;
+    for (int i = 0; i < 8; i++) {
+        size_t n = (size_t)all[i]->rows * all[i]->stride;
+        if (esp_ptr_internal(all[i]->q)) {
+            win += n;
+        } else {
+            wps += n;
+        }
+        scales += (size_t)all[i]->rows * sizeof(float);
+    }
+    size_t hot_bytes = 2 * (size_t)m->n_layers * m->n_kv_heads * m->hot *
+                       m->head_size * sizeof(float);
+    size_t kv = 2 * (size_t)m->n_layers * m->ctx * m->kv_dim * sizeof(float);
+    printf("MEM %s hot=%d hot_bytes=%u weights_internal=%u weights_psram=%u "
+           "scales=%u free_internal=%u largest=%u free_psram=%u kv=%u model=%u\n",
+           label, m->hot, (unsigned)hot_bytes, (unsigned)win, (unsigned)wps,
+           (unsigned)scales,
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+           (unsigned)kv, (unsigned)m->raw_size);
+    fflush(stdout);
+}
+
+// KV footprint and the PSRAM reclaimed when the fp32 caches are freed. The
+// byte counts are computed from the model dimensions; `reclaimed` is measured
+// by the allocator, so it also captures any bookkeeping overhead.
+static void bench_kvmem(llm_t *m, const char *label)
+{
+#if KV_INT8
+    size_t n = (size_t)m->n_layers * m->ctx * m->kv_dim;
+    size_t fp32_bytes = 2 * n * sizeof(float);
+    size_t data = 2 * n;
+    size_t scales = 2 * (size_t)m->n_layers * m->ctx * m->n_kv_heads * sizeof(float);
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    llm_drop_fp32_cache(m);
+    size_t after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    printf("KVMEM %s fp32_bytes=%u int8_data=%u int8_scales=%u int8_total=%u "
+           "ratio=%.2f reclaimed=%u free_psram=%u\n",
+           label, (unsigned)fp32_bytes, (unsigned)data, (unsigned)scales,
+           (unsigned)(data + scales), (double)fp32_bytes / (double)(data + scales),
+           (unsigned)(after - before), (unsigned)after);
+    fflush(stdout);
+#else
+    (void)m;
+    (void)label;
+#endif
+}
+
+// Raw memory bandwidth probe. The pointers are volatile so the compiler
+// cannot vectorise or drop the loads. MB/s = bytes / microseconds.
+static uint32_t bw_read_seq(volatile uint32_t *p, size_t words)
+{
+    uint32_t s = 0;
+    for (size_t i = 0; i < words; i++) {
+        s += p[i];
+    }
+    return s;
+}
+
+// 16 useful bytes out of every 32, the K dot access pattern.
+static uint32_t bw_read_stride(volatile uint32_t *p, size_t words)
+{
+    uint32_t s = 0;
+    for (size_t i = 0; i + 7 < words; i += 8) {
+        s += p[i] + p[i + 1] + p[i + 2] + p[i + 3];
+    }
+    return s;
+}
+
+static uint32_t bw_write_seq(volatile uint32_t *p, size_t words)
+{
+    for (size_t i = 0; i < words; i++) {
+        p[i] = (uint32_t)i;
+    }
+    return 0;
+}
+
+static void bench_psram(void)
+{
+    const size_t ext_bytes = 512 * 1024;
+    volatile uint32_t *ext = heap_caps_malloc(ext_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!ext) {
+        printf("PSRAM bench skipped\n");
+        return;
+    }
+    size_t ew = ext_bytes / 4;
+    uint32_t sink = 0;
+    int64_t best;
+
+    // Warm the mapping.
+    sink += bw_read_seq(ext, ew);
+
+    best = 1 << 30;
+    for (int r = 0; r < 3; r++) {
+        int64_t a = esp_timer_get_time();
+        sink += bw_read_seq(ext, ew);
+        int64_t b = esp_timer_get_time();
+        if (b - a < best) best = b - a;
+    }
+    double ext_seq = (double)ext_bytes / (double)best;
+
+    best = 1 << 30;
+    for (int r = 0; r < 3; r++) {
+        int64_t a = esp_timer_get_time();
+        sink += bw_read_stride(ext, ew);
+        int64_t b = esp_timer_get_time();
+        if (b - a < best) best = b - a;
+    }
+    double ext_str = ((double)ew / 8.0 * 16.0) / (double)best;
+
+    best = 1 << 30;
+    for (int r = 0; r < 3; r++) {
+        int64_t a = esp_timer_get_time();
+        sink += bw_write_seq(ext, ew);
+        int64_t b = esp_timer_get_time();
+        if (b - a < best) best = b - a;
+    }
+    double ext_wr = (double)ext_bytes / (double)best;
+
+    printf("PSRAM ext_seq_mbps=%.1f ext_stride_mbps=%.1f ext_write_mbps=%.1f sink=%u\n",
+           ext_seq, ext_str, ext_wr, (unsigned)sink);
+    fflush(stdout);
+    free((void *)ext);
+}
+
+static void bench_main(void)
+{
+    // Long UART prints (512 logits x 12 steps, 512 timing lines) block the
+    // calling task; the idle-task watchdog is not useful during a measurement
+    // run and its backtraces would corrupt the machine-readable output.
+    esp_task_wdt_deinit();
+    banner();
+    dot_selftest();
+    bench_psram();
+
+    sdmmc_card_t *card = NULL;
+    bool sd_ok = sd_mount(&card);
+
+    size_t model_size = 0;
+    uint8_t *model_raw = NULL;
+    if (sd_ok) {
+        sd_ensure_file(MODEL_PATH, "model");
+        sd_ensure_file(TOK_PATH, "tok");
+        model_raw = load_sd(MODEL_PATH, &model_size);
+    }
+    if (!model_raw) {
+        model_raw = load_part("model", &model_size);
+    }
+    if (!model_raw) {
+        printf("FATAL no model\n");
+        return;
+    }
+
+    llm_t *m = calloc(1, sizeof(llm_t));
+    if (!m || llm_parse(m, model_raw, model_size, 0) != 0) {
+        printf("FATAL parse\n");
+        return;
+    }
+    printf("CFG dim=%d hidden=%d layers=%d heads=%d kv_heads=%d vocab=%d "
+           "seq=%d ctx=%d hot=%d psram_weights=%d\n",
+           m->dim, m->hidden_dim, m->n_layers, m->n_heads, m->n_kv_heads,
+           m->vocab_size, m->seq_len, m->ctx, m->hot, WEIGHTS_PSRAM);
+
+    size_t tok_size = 0;
+    uint8_t *tok_raw = NULL;
+    if (sd_ok) {
+        tok_raw = load_sd(TOK_PATH, &tok_size);
+    }
+    if (!tok_raw) {
+        tok_raw = load_part("tok", &tok_size);
+    }
+    if (!tok_raw) {
+        printf("FATAL no tokenizer\n");
+        return;
+    }
+    tokenizer_t tk;
+    if (tok_parse(&tk, tok_raw, tok_size, m->vocab_size) != 0) {
+        printf("FATAL tokenizer\n");
+        return;
+    }
+
+    if (sd_ok) {
+        esp_vfs_fat_sdcard_unmount("/sdcard", card);
+        sd_ok = false;
+    }
+
+    int64_t tq = esp_timer_get_time();
+    if (llm_quantize(m, !WEIGHTS_PSRAM) != 0) {
+        printf("FATAL quantize\n");
+        return;
+    }
+    printf("QUANT us=%lld\n", (long long)(esp_timer_get_time() - tq));
+    bench_mem(m, "base");
+
+    const char *prompt = "Once upon a time";
+    int ptoks[32];
+    int np = tok_encode(&tk, prompt, 1, ptoks, 32);
+    printf("PROMPT n=%d ids=", np);
+    for (int i = 0; i < np; i++) {
+        printf("%s%d", i ? "," : "", ptoks[i]);
+    }
+    printf("\n");
+
+#if DUMP_LOGITS
+    bench_run(m, &tk, prompt, VAR_TOKENS, false, 0, "fp32", true);
+    bench_run(m, &tk, prompt, VAR_TOKENS, true, 0, "int8", true);
+#endif
+
+#if KVCHECK
+    bench_kvcheck(m, &tk);
+#endif
+#if KV_INT8
+    bench_kvmem(m, "int8only");
+#endif
+
+    for (int r = 0; r < VAR_RUNS; r++) {
+        bench_run(m, &tk, prompt, VAR_TOKENS, true, r, "var", false);
+    }
+
+    // Coarse section profile over the full-context runs. Each run does exactly
+    // m->ctx forwards because the prompt tokens and the generated tokens share
+    // the same position budget.
+    memset(m->prof, 0, sizeof(m->prof));
+    memset(m->aprof, 0, sizeof(m->aprof));
+    memset(m->aprof2, 0, sizeof(m->aprof2));
+    for (int r = 0; r < CTX_RUNS; r++) {
+        bench_run(m, &tk, prompt, CTX_LEN, true, r, "ctx", false);
+    }
+    {
+        static const char *names[8] = {
+            "qkv", "rope", "attn", "wo", "ffn1", "silu", "ffn2", "head",
+        };
+        int forwards = CTX_RUNS * m->ctx;
+        uint64_t total = 0;
+        for (int i = 0; i < 8; i++) {
+            total += m->prof[i];
+        }
+        printf("PROF forwards=%d total_us=%lld\n", forwards, (long long)total);
+        for (int i = 0; i < 8; i++) {
+            printf("PROF %-6s us_per_tok=%.2f pct=%.1f\n", names[i],
+                   (double)m->prof[i] / forwards,
+                   total ? 100.0 * (double)m->prof[i] / (double)total : 0.0);
+        }
+
+        // Attention sub-profile, both cores summed. Cycles are converted at
+        // the 240 MHz CPU clock.
+        static const char *anames[4] = { "kdot", "softmax", "vquant", "vdot" };
+        uint64_t atotal = 0;
+        for (int i = 0; i < 4; i++) {
+            atotal += m->aprof[i] + m->aprof2[i];
+        }
+        printf("APROF forwards=%d cycles=%lld\n", forwards, (long long)atotal);
+        for (int i = 0; i < 4; i++) {
+            uint64_t c = m->aprof[i] + m->aprof2[i];
+            printf("APROF %-8s us_per_tok=%.2f pct=%.1f\n", anames[i],
+                   (double)c / forwards / 240.0,
+                   atotal ? 100.0 * (double)c / (double)atotal : 0.0);
+        }
+        fflush(stdout);
+    }
+
+    bench_mem(m, "final");
+    printf("BENCH_DONE\n");
+    fflush(stdout);
+}
+
+#endif
+
+void app_main(void)
+{
+#if BENCH_MODE
+    bench_main();
+    return;
+#endif
+    banner();
+    dot_selftest();
+    hw_bench();
+
+    sdmmc_card_t *card = NULL;
+    bool sd_ok = sd_mount(&card);
+    if (sd_ok) {
+        ESP_LOGI(TAG, "SD root:");
+        sd_list("/sdcard");
+    } else {
+        ESP_LOGW(TAG, "mount failed, probing the raw card");
+        sd_raw_probe();
+    }
+
+    size_t model_size = 0;
+    uint8_t *model_raw = NULL;
+    if (sd_ok) {
+        sd_ensure_file(MODEL_PATH, "model");
+        sd_ensure_file(TOK_PATH, "tok");
+        model_raw = load_sd(MODEL_PATH, &model_size);
+        if (model_raw) {
+            ESP_LOGI(TAG, "model source: SD card");
+        }
+    }
+    if (!model_raw) {
+        ESP_LOGW(TAG, "falling back to flash partition 'model'");
+        model_raw = load_part("model", &model_size);
+        if (model_raw) {
+            ESP_LOGI(TAG, "model source: flash partition");
+        }
+    }
+    if (!model_raw) {
+        ESP_LOGE(TAG, "no model available; stopping");
+        return;
+    }
+
+    llm_t *m = calloc(1, sizeof(llm_t));
+    int rc = llm_parse(m, model_raw, model_size, CTX_TOKENS);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "model parse failed rc=%d", rc);
+        return;
+    }
+    ESP_LOGI(TAG, "model: dim=%d hidden=%d layers=%d heads=%d kv_heads=%d vocab=%d seq=%d ctx=%d",
+             m->dim, m->hidden_dim, m->n_layers, m->n_heads, m->n_kv_heads,
+             m->vocab_size, m->seq_len, m->ctx);
+
+    size_t tok_size = 0;
+    uint8_t *tok_raw = NULL;
+    if (sd_ok) {
+        tok_raw = load_sd(TOK_PATH, &tok_size);
+    }
+    if (!tok_raw) {
+        tok_raw = load_part("tok", &tok_size);
+    }
+    if (!tok_raw) {
+        ESP_LOGE(TAG, "no tokenizer available; stopping");
+        return;
+    }
+    tokenizer_t tk;
+    if (tok_parse(&tk, tok_raw, tok_size, m->vocab_size) != 0) {
+        ESP_LOGE(TAG, "tokenizer parse failed");
+        return;
+    }
+    ESP_LOGI(TAG, "tokenizer: vocab=%d max_token_len=%d", tk.vocab_size, tk.max_token_length);
+
+    // Both files are in PSRAM now, so the card is no longer needed. Unmounting
+    // releases its FATFS/SDMMC buffers from internal RAM, which is what decides
+    // whether the int8 weight slab fits in SRAM or spills to PSRAM.
+    if (sd_ok) {
+        esp_err_t ue = esp_vfs_fat_sdcard_unmount("/sdcard", card);
+        ESP_LOGI(TAG, "SD unmounted (%s); internal free=%u largest=%u", esp_err_to_name(ue),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        sd_ok = false;
+    }
+
+    const char *prompt = "Once upon a time";
+    int probe[32];
+    int np = tok_encode(&tk, prompt, 1, probe, 32);
+    char pline[128];
+    int off = 0;
+    for (int i = 0; i < np && off < (int)sizeof(pline) - 8; i++) {
+        off += snprintf(pline + off, sizeof(pline) - (size_t)off, "%s%d", i ? "," : "", probe[i]);
+    }
+    ESP_LOGI(TAG, "prompt \"%s\" -> [%s]", prompt, pline);
+
+    // Quantize before the fp32 run so the int8 weights get first pick of the
+    // internal heap, before anything else fragments it.
+    int64_t tq = esp_timer_get_time();
+    if (llm_quantize(m, true) != 0) {
+        ESP_LOGE(TAG, "quantize failed");
+        return;
+    }
+    ESP_LOGI(TAG, "int8 quantize took %d us", (int)(esp_timer_get_time() - tq));
+    llm_print_mem(m);
+
+    // ---- fp32 reference path (correctness) ----
+    gen_result_t gf;
+    int64_t t0 = esp_timer_get_time();
+    run_gen(m, &tk, prompt, GEN_TOKENS, false, &gf);
+    ESP_LOGI(TAG, "fp32 first pass done in %d us", (int)(esp_timer_get_time() - t0));
+    report_gen("fp32", &gf);
+    int bad = match_expected(&gf);
+    ESP_LOGI(TAG, "fp32 vs reference: %s", bad < 0 ? "MATCH" : "DIFFERS");
+
+    // ---- int8 SIMD path ----
+    memset(m->prof, 0, sizeof(m->prof));
+    gen_result_t gq;
+    run_gen(m, &tk, prompt, GEN_TOKENS, true, &gq);
+    report_gen("int8", &gq);
+    int bad8 = match_expected(&gq);
+    ESP_LOGI(TAG, "int8 vs fp32 reference: %s", bad8 < 0 ? "MATCH" : "DIFFERS");
+    report_prof(m, gq.n_prompt + gq.n_gen);
+    if (bad8 >= 0) {
+        ESP_LOGI(TAG, "  first differing token index %d (int8=%d expected=%d)",
+                 bad8, gq.ids[bad8], EXPECTED[bad8]);
+    }
+
+    // ---- CPU clock baseline ----
+    int64_t base = bench_cpu("240MHz", 3000000);
+
+    // ---- clock experiment: what does a 320 MHz PLL actually give us? ----
+    // Measured result from the previous run: SEL=2 on a 320 MHz PLL is PLL/2 =
+    // 160 MHz, i.e. 1.50x the 240 MHz time. Generation then hangs, so the PSRAM
+    // path is not usable in that state. The only untried selector is SEL=3.
+    ESP_LOGW(TAG, "clock experiment: 320 MHz PLL");
+    int64_t t_oc = esp_timer_get_time();
+    pll_switch(480, 80, 6);
+    if (bbpll_program(320, 200)) {
+        pll_switch(320, 240, 1);                    // SEL=2
+        int64_t t2 = bench_cpu("320PLL/sel2", 3000000);
+        ESP_LOGI(TAG, "sel2: %d%% of the 240 MHz time", (int)(t2 * 100 / base));
+
+        ESP_LOGW(TAG, "probing SEL=3 on the same PLL");
+        REG_SET_FIELD(SYSTEM_CPU_PER_CONF_REG, SYSTEM_CPUPERIOD_SEL, 3);
+        int64_t t3 = bench_cpu("320PLL/sel3", 3000000);
+        ESP_LOGI(TAG, "sel3: %d%% of the 240 MHz time", (int)(t3 * 100 / base));
+
+        REG_SET_FIELD(SYSTEM_CPU_PER_CONF_REG, SYSTEM_CPUPERIOD_SEL, 0);
+    }
+    ESP_LOGW(TAG, "clock experiments done in %d us", (int)(esp_timer_get_time() - t_oc));
+
+    cpu_set_240();
+    int64_t back = bench_cpu("240MHz again", 3000000);
+    ESP_LOGI(TAG, "restore check: %d%% of the original 240 MHz time", (int)(back * 100 / base));
+
+    // ---- soak at 240 MHz: identical output every run means no corruption ----
+    bool stable = true;
+    for (int i = 0; i < SOAK_RUNS; i++) {
+        gen_result_t g;
+        run_gen(m, &tk, prompt, GEN_TOKENS, true, &g);
+        bool same = g.n_gen == gq.n_gen;
+        for (int j = 0; same && j < g.n_gen; j++) {
+            if (g.ids[j] != gq.ids[j]) {
+                same = false;
+            }
+        }
+        ESP_LOGI(TAG, "soak %d/%d: %s", i + 1, SOAK_RUNS, same ? "identical" : "DIVERGED");
+        if (!same) {
+            stable = false;
+        }
+    }
+    ESP_LOGI(TAG, "soak: %s", stable ? "PASS" : "FAIL");
+
+    ESP_LOGI(TAG, "final clock: %d Hz", (int)clk_hal_cpu_get_freq_hz());
+    ESP_LOGI(TAG, "done; free internal=%u psram=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}

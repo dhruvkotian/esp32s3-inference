@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this artifact, cite the paper and this release."
+title: "esp32s3-int8-transformer: INT8 KV-cache and attention kernels for the ESP32-S3"
+abstract: >-
+  Firmware, raw measurement logs and analysis scripts for a 260K-parameter
+  decoder-only transformer running at batch size one on an ESP32-S3, with the
+  key/value cache stored as int8 in external PSRAM and attention mapped onto
+  the 128-bit integer SIMD unit. At 512-token context the final build sustains
+  166.73 tokens/s, 2.872x the same-tree fp32 single-core baseline.
+type: software
+authors:
+  - family-names: Kotian
+    given-names: Dhruv
+    orcid: "https://orcid.org/0009-0000-5660-1911"
+    email: dhruvjkotian@gmail.com
+    affiliation: "Department of Mechatronics Engineering, RTMSSU, Kharghar, India"
+license: GPL-3.0-only
+version: 1.0.0
+date-released: 2026-11-22
+repository-code: "https://github.com/dhruvkotian/esp32s3-int8-transformer"
+keywords:
+  - transformer inference
+  - KV cache
+  - int8 quantisation
+  - ESP32-S3
+  - Xtensa LX7
+  - SIMD
+  - memory hierarchy
+  - embedded systems
+references:
+  - type: article
+    title: >-
+      Bytes, Not FLOPs: INT8 KV-Cache and Attention Optimisation for
+      Long-Context Transformer Inference on the ESP32-S3
+    authors:
+      - family-names: Kotian
+        given-names: Dhruv
+    year: 2026
+    notes: "Manuscript under review."
