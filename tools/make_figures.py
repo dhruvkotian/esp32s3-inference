@@ -177,7 +177,7 @@ def fig_throughput():
         ("integer K dot, 64 KB", "bench_kvint8_idot2.log", "#ff7f0e"),
         ("V transpose, 64 KB", "bench_kvint8_vt.log", "#2ca02c"),
         ("dual core, 64 KB", "bench_kvint8_dc.log", "#d62728"),
-        ("final kernels, 64 KB", "bench_kvint8_final3.log", "#9467bd"),
+        ("final + fused load, 64 KB", "bench_kvint8_fused_1.log", "#9467bd"),
     ]
     fig, ax = plt.subplots(figsize=(7.2, 4.2))
     for label, fn, color in series:
@@ -211,7 +211,7 @@ def fig_sustained():
         ("integer K\n64 KB", "bench_kvint8_idot2.log", "#ff7f0e"),
         ("V transpose\n64 KB", "bench_kvint8_vt.log", "#2ca02c"),
         ("dual core\n64 KB", "bench_kvint8_dc.log", "#d62728"),
-        ("final kernels\n64 KB", "bench_kvint8_final3.log", "#9467bd"),
+        ("final kernels\n64 KB", "bench_kvint8_fused_1.log", "#9467bd"),
     ]
     labels, vals, colors = [], [], []
     for label, fn, color in bars:
@@ -239,7 +239,7 @@ def fig_sustained():
 # figure 3: section profile
 
 def fig_sections():
-    prof = parse_prof(LOGS / "bench_kvint8_final3.log")
+    prof = parse_prof(LOGS / "bench_kvint8_fused_1.log")
     order = [
         ("attn", "attention"),
         ("ffn1", "ffn w1/w3"),
@@ -274,7 +274,7 @@ def fig_sections():
 # figure 4: attention sub-profile
 
 def fig_subprofile():
-    ap = parse_aprof(LOGS / "bench_kvint8_final3.log")
+    ap = parse_aprof(LOGS / "bench_kvint8_fused_1.log")
     order = [
         ("kdot", "K dot", "#1f77b4"),
         ("softmax", "softmax + fold", "#2ca02c"),
@@ -305,7 +305,7 @@ def fig_subprofile():
 
 def fig_accuracy():
     ref = LOGS / "bench_acc_ref.log"
-    fin = LOGS / "bench_kvint8_final3.log"
+    fin = LOGS / "bench_kvint8_fused_1.log"
     series = [
         ("Weight-only (int8 weights, fp32 KV)",
          compare_logits(ref, "fp32L", ref, "int8L"), "#ff7f0e", "o"),
@@ -351,16 +351,16 @@ def fig_accuracy():
 # figure 6: PSRAM bandwidth
 
 def fig_psram():
-    ps = parse_psram(LOGS / "bench_kvint8_final3.log")
+    ps = parse_psram(LOGS / "bench_kvint8_fused_1.log")
     labels = ["Sequential\nread", "Strided read\n(16 of 32 B)", "Sequential\nwrite"]
     keys = ["ext_seq_mbps", "ext_stride_mbps", "ext_write_mbps"]
-    vals = [require(ps, k, "bench_kvint8_final3.log") for k in keys]
+    vals = [require(ps, k, "bench_kvint8_fused_1.log") for k in keys]
 
     # Streamed KV bytes per token at 512 context: 5 layers * 496 positions *
     # 96 B. Positions 0..15 are the fp32 hot window in internal SRAM.
     kv_bytes = 5 * 496 * 96
-    attn_us = require(parse_prof(LOGS / "bench_kvint8_final3.log"), "attn",
-                      "bench_kvint8_final3.log")
+    attn_us = require(parse_prof(LOGS / "bench_kvint8_fused_1.log"), "attn",
+                      "bench_kvint8_fused_1.log")
     achieved = kv_bytes / attn_us
 
     fig, ax = plt.subplots(figsize=(6.4, 4.0))
@@ -392,8 +392,8 @@ def fig_psram():
 # figure 7: cache sweep
 
 def fig_cache():
-    logs = [("32 KB", "bench_kvint8_final_32kb.log"),
-            ("64 KB", "bench_kvint8_final3.log")]
+    logs = [("32 KB", "bench_kvint8_fused_32kb.log"),
+            ("64 KB", "bench_kvint8_fused_1.log")]
     sus = [sustained(LOGS / fn) for _, fn in logs]
     attn = [require(parse_prof(LOGS / fn), "attn", fn) for _, fn in logs]
     aps = [parse_aprof(LOGS / fn) for _, fn in logs]
@@ -457,6 +457,7 @@ def fig_waterfall():
         ("+ softmax_fold", "bench_kvint8_fuse.log", "#a0522d"),
         ("+ batched K x4", "bench_kvint8_x4.log", "#d81b60"),
         ("+ inline rounding", "bench_kvint8_final3.log", "#00897b"),
+        ("+ fused long dot", "bench_kvint8_fused_1.log", "#004d40"),
     ]
     labels = [r[0] for r in rows]
     vals = [sustained(LOGS / fn) for _, fn, _ in rows]

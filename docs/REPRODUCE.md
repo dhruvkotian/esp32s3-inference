@@ -145,8 +145,14 @@ The report script reads both captures, fails if they disagree by more than
 0.5%, and regenerates `logs/MICRO-RESULT.md`. The app prints the ESP-DSP tag
 it was built against; it should be `v1.8.2`.
 
-This microbenchmark is instruction-level and L1-resident. It does not measure
-the PSRAM scan, and it does not test the ESP-DL Attention module.
+This microbenchmark is instruction-level and cache-resident. It does not
+measure the PSRAM scan, and it does not test the ESP-DL Attention module.
+
+The fused-load A/B is separate from the microbenchmark. Flash the v1.1.0 binary
+(`bench_ab_base_1.log` and `_2.log`) and the v1.2.0 binary
+(`bench_kvint8_fused_1.log` through `_6.log`) alternately in one session, with
+the same `bench_cfg.h` and prompt. `tools/micro_report.py` recomputes the
+medians and fails if the 42 logit blocks are not byte-identical.
 
 ## What is not reproduced here
 
@@ -156,7 +162,8 @@ the PSRAM scan, and it does not test the ESP-DL Attention module.
 
 ## Known variance
 
-Sustained throughput across independent captures of the same build spans
-166.727 to 166.750 tokens/s, about 0.014%. The board is reflashed between
-sessions, so that spread covers flash, boot and allocator placement, not only
-run-to-run noise.
+Sustained throughput across the six captures of the v1.2.0 build spans
+168.244 to 168.282 tokens/s, about 0.023%. The board is reflashed between
+captures, so that spread covers flash, boot and allocator placement, not only
+run-to-run noise. The two v1.1.0 baseline captures used in the A/B land at
+166.74 tokens/s.

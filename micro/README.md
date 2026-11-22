@@ -67,6 +67,12 @@ Restore the paper firmware afterwards from `../firmware` (same command, with
 python3 ../tools/micro_report.py
 ```
 
-This reads both captures, checks that they agree to within 0.5%, and writes
-`../logs/MICRO-RESULT.md`. It refuses to write if a case is missing or the two
-runs disagree, so the report cannot drift from the captures.
+This reads the four microbenchmark captures (two per kernel build) plus the
+eight end-to-end A/B captures, checks that two captures of the same kernel
+agree to within 0.5%, and writes `../logs/MICRO-RESULT.md`. It also fails if
+the v1.2.0 logits are not byte-identical to the v1.1.0 logits, so the report
+cannot drift from the captures.
+
+`main/dot_s8.S` is a byte-identical copy of `../firmware/main/dot_s8.S`, which
+is the v1.2.0 fused kernel. The two-load rows in the report come from the
+v1.1.0 copy captured before the fused load was adopted.

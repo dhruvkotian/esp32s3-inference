@@ -25,12 +25,19 @@ llm_dot_s8:
     wur.accx_0 a14              // clear ACCX
     wur.accx_1 a14
 
-.Lblk:
+    // Fused load and MAC. EE.VMULAS.S8.ACCX.LD.IP accumulates the current
+    // 16-byte block and loads the next b block in the same instruction, so the
+    // inner loop is two instructions and uses the zero-overhead loop.
     ee.vld.128.ip q0, a2, 16
     ee.vld.128.ip q1, a3, 16
-    ee.vmulas.s8.accx q0, q1    // ACCX += sum(a[i] * b[i]) for 16 lanes
     addi    a6, a6, -1
-    bnez    a6, .Lblk
+    beqz    a6, .Llast
+    loopnez a6, .Lblk
+    ee.vmulas.s8.accx.ld.ip q1, a3, 16, q0, q1
+    ee.vld.128.ip q0, a2, 16
+.Lblk:
+.Llast:
+    ee.vmulas.s8.accx q0, q1    // ACCX += sum(a[i] * b[i]) for 16 lanes
 
     rur.accx_0 a5               // low 32 bits of ACCX
 

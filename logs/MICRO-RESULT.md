@@ -1,72 +1,84 @@
-# Vendor versus same-tree int8 dot kernels
+# Vendor comparison and the fused-load A/B
 
-Two captures of the same microbenchmark, `micro_dsp_vs_ours.log` and
-`micro_dsp_vs_ours_run2.log`, on the paper's board: ESP32-S3 at 240 MHz,
-ESP-IDF v5.4.4, ESP-DSP v1.8.2 (`CONFIG_DSP_OPTIMIZED=y`), 16 KB working set
-in internal SRAM. The two captures agree to within 0.002% on every
-case. Regenerate this file with `python3 tools/micro_report.py`.
+Sources: two captures of each microbenchmark build, two captures of the
+v1.1.0 firmware, six captures of the v1.2.0 firmware. Regenerate with
+`python3 tools/micro_report.py`. The script fails if a capture is missing, if
+two captures of the same kernel disagree by more than 0.5%, or if the v1.2.0
+logits differ from the v1.1.0 logits.
 
-The benchmark answers one question: on the shapes the attention scan actually
-uses, what does the vendor primitive cost next to ours? The data is resident,
-so these are instruction costs, not PSRAM traffic.
+## Setup
 
-| Case | Blocks | Cycles/call | Cycles/block | Cycles/block less loop |
-|---|---:|---:|---:|---:|
-| harness loop and call, no kernel | 0 | 5.00 | 0.00 | 0.00 |
-| ours, one 16-lane dot | 1 | 24.01 | 24.01 | 19.01 |
-| ESP-DSP, len 16 | 1 | 36.02 | 36.02 | 31.02 |
-| ours, len 32 | 2 | 42.03 | 21.01 | 18.51 |
-| ESP-DSP, len 32 | 2 | 39.03 | 19.51 | 17.01 |
-| ours, len 128 | 8 | 91.06 | 11.38 | 10.76 |
-| ESP-DSP, len 128 | 8 | 56.03 | 7.00 | 6.38 |
-| ours, len 496 | 31 | 276.17 | 8.91 | 8.75 |
-| ESP-DSP, len 496 | 31 | 128.08 | 4.13 | 3.97 |
-| ours, four positions, one call | 4 | 64.04 | 16.01 | 14.76 |
-| ours, four positions, four calls | 4 | 89.06 | 22.26 | 21.01 |
-| ESP-DSP, four positions, four calls | 4 | 132.09 | 33.02 | 31.77 |
+ESP32-S3 at 240 MHz, ESP-IDF v5.4.4, ESP-DSP v1.8.2 with
+`CONFIG_DSP_OPTIMIZED=y`. Microbenchmark buffers are in internal SRAM, working
+set 15,872 B, so the numbers are instruction cost rather than PSRAM traffic.
+Every case is timed five times and the median is reported; the harness loop and
+call cost 5.00 cycles, measured with an empty function.
 
-The harness loop and call cost 5.00 cycles, measured by timing an
-empty function. Subtract that when comparing single 16-lane dots; it is spread
-over the blocks for the longer cases.
+The two kernels differ only in the long dot. `two-load` is the v1.1.0 loop:
+two vector loads and a separate MAC per 16-byte block. `fused` is the v1.2.0
+loop: `EE.VMULAS.S8.ACCX.LD.IP` loads the next block while accumulating the
+current one, in a zero-overhead `loopnez`. The 16-lane single dot and the
+four-position batch are unchanged between the two builds.
 
-## What the numbers say
+## Microbenchmark
 
-**Our batched K dot wins, and it has to.** Four separate ESP-DSP calls cost
-132.09 cycles; one `llm_dot16x4_s8` call costs
-64.04, a factor of 2.06. Four separate calls
-to our own single dot cost 89.06, so the batch is
-worth 1.39x against our own
-code. Replacing the batch with the vendor primitive would add
-17.01 cycles
-per score, or about 1406 us per token across 19,840 scores,
-roughly 23% of the 6.00 ms token.
+| Kernel | Case | Blocks | Cycles/call | Cycles/block |
+|---|---|---:|---:|---:|
+| two-load | one 16-lane dot | 1 | 24.01 | 24.01 |
+| two-load | ESP-DSP len 16 | 1 | 36.02 | 36.02 |
+| two-load | four positions, one call | 4 | 64.04 | 16.01 |
+| two-load | four positions, four calls | 4 | 89.06 | 22.26 |
+| two-load | ESP-DSP four calls | 4 | 132.09 | 33.02 |
+| two-load | len 32 | 2 | 42.03 | 21.01 |
+| two-load | len 128 | 8 | 91.06 | 11.38 |
+| two-load | len 496 | 31 | 276.17 | 8.91 |
+| fused | len 32 | 2 | 38.03 | 19.01 |
+| fused | len 128 | 8 | 57.03 | 7.13 |
+| fused | len 496 | 31 | 127.08 | 4.10 |
+| ESP-DSP | len 32 | 2 | 39.03 | 19.51 |
+| ESP-DSP | len 128 | 8 | 56.03 | 7.00 |
+| ESP-DSP | len 496 | 31 | 128.08 | 4.13 |
 
-**The vendor long dot wins, but there is little to collect.** At len 496 the
-vendor loop is 2.16x
-faster per block (4.13 against
-8.91 cycles), because it fuses the load into
-`ee.vmulas.s8.accx.ld.ip` and runs a zero-overhead `loopnez`. Our kernel loads
-and multiplies separately. The V path calls a long dot once per output element:
-160 calls per token over an average of 248.5 positions, about
-2,485 blocks. Closing the whole per-block gap would save at most
-49 us per token, 0.8% of the token,
-and only if that phase were compute-bound, which the in-situ profile says it is
-not. At len 16 the vendor call is the slower one
-(36.02 against 24.01 cycles),
-because its prologue and loop setup dominate, and many V calls at shallow
-positions are that short.
+The four-position batch is worth 2.06x against four ESP-DSP calls and
+1.39x against four calls to our own single dot. Replacing the batch
+with the vendor primitive would add 17 cycles per score, about
+1406 $\mu$s per token across 19,840 scores.
 
-**The instruction was never the contribution.** The vendor loop and ours issue
-the same 16-lane MAC; the difference is two extra instructions per block and a
-loop branch. Batching four scores per call is worth more than the vendor's
-per-block advantage, and the paper's 40 cycles per score in situ is mostly
-memory, not arithmetic.
+The vendor long dot is 2.16x faster per block than the
+two-load kernel (4.13 against 8.91 cycles), which is why
+the fused loop was adopted. The fused kernel matches the vendor loop
+(4.10 against 4.13 cycles per block) without the vendor
+prologue, so it also wins at short lengths.
 
-## Why this does not change the paper
+## End-to-end A/B
 
-The paper claims a mapping and a cache layout, not a faster instruction. The
-microbenchmark supports that: the kernel we wrote is better than the vendor
-primitive on the shape the score path uses, and behind it only on the long dot,
-where the measured phase is memory-bound and the ceiling is about
-0.8%. Adopting the fused load in `llm_dot_s8` is a
-bounded, testable change for a later version, not a correction to this one.
+Protocol: alternate baseline and candidate in one session, 512 context, 64 KB
+cache, dual core, three 512-token runs per capture. Baseline is v1.1.0
+(2 captures, 6 runs); candidate is v1.2.0
+(6 captures, 18 runs). Both use the same
+`bench_cfg.h`, prompt and harness.
+
+| Metric | v1.1.0 | v1.2.0 | Change |
+|---|---:|---:|---:|
+| Throughput (tokens/s) | 166.74 | 168.25 | +0.91% |
+| Token (ms) | 5.998 | 5.944 | -0.90% |
+| Attention (ms) | 4.608 | 4.554 | -1.18% |
+| K dot ($\mu$s) | 3314.7 | 3297.0 | -0.54% |
+| Softmax ($\mu$s) | 3305.3 | 3302.9 | -0.07% |
+| V quantise ($\mu$s) | 874.5 | 874.4 | -0.02% |
+| V dot ($\mu$s) | 1448.4 | 1355.7 | -6.40% |
+
+All 42 logit blocks are byte-identical between the two builds, so the
+kernel change is bit-exact. The spread over the 18 v1.2.0 runs
+is 168.24 to 168.28 tokens/s
+(0.023%).
+
+## Conclusion
+
+The vendor long dot was 2.16x faster per block than the
+two-load kernel, and adopting its fused load moved the V phase from
+1448.4 to 1355.7 $\mu$s of core time
+(-6.4%), worth
++0.91% end to end. The rest of the scan
+did not move, which is what the bandwidth analysis predicts: the V dot was the
+one phase with enough instruction headroom left to matter.

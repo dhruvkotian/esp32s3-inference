@@ -1,6 +1,6 @@
 # Artifact build map
 
-Each row of Table IV in the paper is one build of this firmware, and each row
+Each row of Table 5 in the paper is one build of this firmware, and each row
 changes exactly one switch or one kernel. This file maps the table rows to the
 raw capture that produced them, so a reader can check every number without
 trusting the paper.
@@ -10,7 +10,7 @@ Sustained throughput is the median of the `RUN ctx` lines in each capture:
 after a five-token prompt. `tools/analyze_bench.py` and
 `tools/make_figures.py` use the same definition.
 
-| Table IV row | tokens/s | Raw capture |
+| Table 5 row | tokens/s | Raw capture |
 |---|---:|---|
 | fp32 KV, 64 KB, 1 core | 58.06 | `bench_fp32_64_single.log` |
 | int8 KV, dequantise on read | 46.52 | `bench_kvint8_c64_skip.log` |
@@ -22,11 +22,12 @@ after a five-token prompt. `tools/analyze_bench.py` and
 | + `softmax_fold` | 134.01 | `bench_kvint8_fuse.log` |
 | + batched K dot x4 | 148.01 | `bench_kvint8_x4.log` |
 | + inline rounding | 166.73 | `bench_kvint8_final3.log` |
+| + fused long dot | 168.25 | `bench_kvint8_fused_1.log` |
 
 `bench_kvint8_mem.log` repeats the `att2` build with the memory and phase
 reporting enabled, which is why it also lands at 123.22 tokens/s.
 
-## Same-tree fp32 matrix (Table III)
+## Same-tree fp32 matrix (Table 4)
 
 | Cache | Cores | tokens/s | Attention us/token | Raw capture |
 |---|---:|---:|---:|---|
@@ -39,14 +40,14 @@ reporting enabled, which is why it also lands at 123.22 tokens/s.
 
 | Build | tokens/s | Raw capture |
 |---|---:|---|
-| 32 KB final kernel | 156.31 | `bench_kvint8_final_32kb.log` |
-| 64 KB final kernel | 166.73 | `bench_kvint8_final3.log` |
+| 32 KB final kernel | 157.48 | `bench_kvint8_fused_32kb.log` |
+| 64 KB final kernel | 168.25 | `bench_kvint8_fused_1.log` |
 
 The 14.5% figure quoted for the pre-kernel comparison comes from
 `bench_kvint8_meas32.log` (106.74 tokens/s) and `bench_kvint8_meas64b.log`
 (122.27 tokens/s), which are the same kernel with the cache doubled.
 
-## Negative results (Table VI and Section 10.2)
+## Negative results (Table 7 and Section 10.2)
 
 | Variant | tokens/s | Raw capture |
 |---|---:|---|
@@ -60,9 +61,11 @@ The 14.5% figure quoted for the pre-kernel comparison comes from
 
 ## Reproducibility runs
 
-`bench_kvint8_final.log`, `bench_kvint8_final2.log`, `bench_kvint8_final4.log`
-and `bench_kvint8_round.log` are independent captures of the final build. With
-`bench_kvint8_final3.log` they give the spread reported in Section 8.5.
+`bench_kvint8_fused_1.log` through `bench_kvint8_fused_6.log` are independent
+captures of the final build, with the board reflashed between captures. They
+give the 168.24 to 168.28 tokens/s spread reported in Section 8. The older
+`bench_kvint8_final*.log` captures are the v1.1.0 kernel and remain the source
+for the `inline rounding` row.
 
 ## Accuracy
 
@@ -83,16 +86,36 @@ accuracy harness.
 
 ## Vendor comparison (Section 4.5, Table 3)
 
-The microbenchmark is a separate app; the two captures below are its only
-source. `tools/micro_report.py` regenerates `logs/MICRO-RESULT.md` from them
-and fails if they disagree by more than 0.5%.
+The microbenchmark is a separate app. `tools/micro_report.py` regenerates
+`logs/MICRO-RESULT.md` from the four captures below and fails if two captures
+of the same kernel disagree by more than 0.5%.
 
 | Case | Raw capture |
 |---|---|
-| all cases, first run | `micro_dsp_vs_ours.log` |
-| all cases, second run | `micro_dsp_vs_ours_run2.log` |
+| two-load kernel, first run | `micro_dsp_vs_ours.log` |
+| two-load kernel, second run | `micro_dsp_vs_ours_run2.log` |
+| fused kernel, first run | `micro_dsp_vs_ours_fused.log` |
+| fused kernel, second run | `micro_dsp_vs_ours_fused_run2.log` |
 
 The app is in `micro/`. It links ESP-DSP v1.8.2, which is not vendored here;
 `micro/README.md` gives the clone command and the build switches. The
 `dot_s8.S` in `micro/main/` is a byte-identical copy of
 `firmware/main/dot_s8.S`, so the timed kernels are the released kernels.
+
+## Fused-load A/B (Section 4.5)
+
+Baseline is v1.1.0 (`bench_ab_base_1.log`, `bench_ab_base_2.log`); candidate is
+v1.2.0 (`bench_kvint8_fused_1.log` through `bench_kvint8_fused_6.log`). The
+captures were interleaved in one session, with the board reflashed between
+each. `tools/micro_report.py` recomputes the medians and fails if the 42 logit
+blocks are not byte-identical.
+
+| Metric | v1.1.0 | v1.2.0 |
+|---|---:|---:|
+| Throughput (tokens/s) | 166.74 | 168.25 |
+| Token (ms) | 5.998 | 5.944 |
+| Attention (ms) | 4.608 | 4.554 |
+| K dot (us) | 3314.7 | 3297.0 |
+| Softmax (us) | 3305.3 | 3302.9 |
+| V quantise (us) | 874.5 | 874.4 |
+| V dot (us) | 1448.4 | 1355.7 |

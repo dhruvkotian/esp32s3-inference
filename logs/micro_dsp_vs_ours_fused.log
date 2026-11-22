@@ -1,0 +1,100 @@
+ÂÑESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0xb (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2810,len:0x1564
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xd24
+load:0x403cb700,len:0x2ed4
+entry 0x403c8928
+I (27) boot: ESP-IDF v5.4.4 2nd stage bootloader
+I (27) boot: compile time Nov 18 2026 14:01:30
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (30) boot: efuse block revision: v1.3
+I (33) boot.esp32s3: Boot SPI Speed : 80MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (45) boot: Enabling RNG early entropy source...
+I (49) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (65) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 factory          factory app      00 00 00010000 00200000
+I (78) boot:  3 model            Unknown data     01 40 00210000 00200000
+I (84) boot:  4 tok              Unknown data     01 41 00410000 00010000
+I (91) boot: End of partition table
+I (94) esp_image: segment 0: paddr=00010020 vaddr=3c020020 size=09a0ch ( 39436) map
+I (109) esp_image: segment 1: paddr=00019a34 vaddr=3fc91600 size=02d44h ( 11588) load
+I (111) esp_image: segment 2: paddr=0001c780 vaddr=40374000 size=03898h ( 14488) load
+I (120) esp_image: segment 3: paddr=00020020 vaddr=42000020 size=120e8h ( 73960) map
+I (137) esp_image: segment 4: paddr=00032110 vaddr=40377898 size=09cc0h ( 40128) load
+I (146) esp_image: segment 5: paddr=0003bdd8 vaddr=50000000 size=0001ch (    28) load
+I (152) boot: Loaded app from partition at offset 0x10000
+I (152) boot: Disabling RNG early entropy source...
+I (164) cpu_start: Multicore app
+I (172) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (173) cpu_start: Pro cpu start user code
+I (173) cpu_start: cpu freq: 240000000 Hz
+I (175) app_init: Application information:
+I (178) app_init: Project name:     micro
+I (182) app_init: App version:      1
+I (186) app_init: Compile time:     Nov 22 2026 16:40:23
+I (191) app_init: ELF file SHA256:  6ea75b8b3...
+I (195) app_init: ESP-IDF:          v5.4.4
+I (199) efuse_init: Min chip rev:     v0.0
+I (203) efuse_init: Max chip rev:     v0.99 
+I (207) efuse_init: Chip rev:         v0.2
+I (210) heap_init: Initializing. RAM available for dynamic allocation:
+I (217) heap_init: At 3FC98E00 len 00050910 (322 KiB): RAM
+I (222) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (227) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (232) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (238) spi_flash: detected chip: boya
+I (241) spi_flash: flash io: dio
+I (244) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (250) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (257) main_task: Started on CPU0
+I (267) main_task: Calling app_main()
+
+MICRO start
+MICRO esp-dsp v1.8.2
+MICRO cpu 240 MHz, positions 496, kstride 32, working set 15872 B
+CHECK llm_dot16_s8                 got=170      want=170      PASS
+CHECK dsps_dp_s8 len=16            got=170      want=170      PASS
+CHECK llm_dot16_s8                 got=-33943   want=-33943   PASS
+CHECK dsps_dp_s8 len=16            got=-33943   want=-33943   PASS
+CHECK llm_dot16_s8                 got=-1944    want=-1944    PASS
+CHECK dsps_dp_s8 len=16            got=-1944    want=-1944    PASS
+CHECK llm_dot16_s8                 got=781      want=781      PASS
+CHECK dsps_dp_s8 len=16            got=781      want=781      PASS
+CHECK llm_dot16_s8                 got=39657    want=39657    PASS
+CHECK dsps_dp_s8 len=16            got=39657    want=39657    PASS
+CHECK llm_dot16_s8                 got=-3337    want=-3337    PASS
+CHECK dsps_dp_s8 len=16            got=-3337    want=-3337    PASS
+CHECK llm_dot_s8 len=32            got=365      want=365      PASS
+CHECK dsps_dp_s8 len=32            got=365      want=365      PASS
+CHECK llm_dot_s8 len=128           got=24425    want=24425    PASS
+CHECK dsps_dp_s8 len=128           got=24425    want=24425    PASS
+CHECK llm_dot_s8 len=496           got=16304    want=16304    PASS
+CHECK dsps_dp_s8 len=496           got=16304    want=16304    PASS
+CHECK llm_dot16x4_s8[0]            got=170      want=170      PASS
+CHECK llm_dot16x4_s8[1]            got=9354     want=9354     PASS
+CHECK llm_dot16x4_s8[2]            got=-6803    want=-6803    PASS
+CHECK llm_dot16x4_s8[3]            got=12332    want=12332    PASS
+MICRO correctness PASS
+CASE empty_call               reps=200000 blocks=0   cyc_min=1000002 cyc_med=1000008
+CASE llm_dot16_s8             reps=200000 blocks=1   cyc_min=4802907 cyc_med=4802944
+CASE dsps_dp_s8_len16         reps=200000 blocks=1   cyc_min=7204370 cyc_med=7204384
+CASE llm_dot_s8_len32         reps=100000 blocks=2   cyc_min=3801618 cyc_med=3802830
+CASE dsps_dp_s8_len32         reps=100000 blocks=2   cyc_min=3901676 cyc_med=3902886
+CASE llm_dot_s8_len128        reps=50000  blocks=8   cyc_min=2851508 cyc_med=2851536
+CASE dsps_dp_s8_len128        reps=50000  blocks=8   cyc_min=2801521 cyc_med=2801559
+CASE llm_dot_s8_len496        reps=20000  blocks=31  cyc_min=2541588 cyc_med=2541604
+CASE dsps_dp_s8_len496        reps=20000  blocks=31  cyc_min=2561570 cyc_med=2561579
+CASE llm_dot16x4_s8           reps=50000  blocks=4   cyc_min=3201403 cyc_med=3201502
+CASE four_llm_dot16_s8        reps=50000  blocks=4   cyc_min=4451608 cyc_med=4452934
+CASE four_dsps_dp_s8_len16    reps=50000  blocks=4   cyc_min=6603076 cyc_med=6604405
+MICRO done
+I (1357) main_task: Returned from app_main()

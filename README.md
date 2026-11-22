@@ -7,7 +7,7 @@ This repository is the experiment tree behind the paper. It runs a
 260K-parameter decoder-only transformer at batch size one on an ESP32-S3, with
 the key/value cache stored as int8 in external PSRAM and attention mapped onto
 the 128-bit integer SIMD unit. At 512-token context the final build sustains
-166.73 tokens/s, 2.872x the same-tree fp32 single-core baseline.
+168.25 tokens/s, 2.898x the same-tree fp32 single-core baseline.
 
 Every number in the paper comes from a raw UART capture in `logs/`. The mapping
 from paper table rows to capture files is in [`logs/BUILD-MAP.md`](logs/BUILD-MAP.md).
@@ -74,9 +74,11 @@ The full procedure, including the build switches for each experiment, is in
 `dsps_dp_s8` against `llm_dot16_s8`, `llm_dot16x4_s8` and `llm_dot_s8` on
 internal-SRAM buffers. It exists to answer the obvious question: why not use
 the vendor primitive? The answer is in [`logs/MICRO-RESULT.md`](logs/MICRO-RESULT.md).
-On the score shape the batched kernel is 2.06x faster than four vendor calls;
-on the long dot the vendor loop is 2.16x faster per block, but that gap is
-worth at most 0.8% of the token because the V phase is memory-bound in situ.
+On the score shape the batched kernel is 2.06x faster than four vendor calls.
+On the long dot the vendor loop is 2.16x faster per block, so v1.2.0 adopts
+the same fused load in `llm_dot_s8`; an interleaved A/B measured 166.74 to
+168.25 tokens/s (+0.9%) with byte-identical logits. The rest of the scan did
+not move, because the V phase is memory-bound in situ.
 
 ## Regenerating the figures
 
