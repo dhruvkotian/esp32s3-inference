@@ -236,16 +236,21 @@ four-position batch are unchanged between the two builds.
 |---|---|---:|---:|---:|
 {table}
 
-The four-position batch is worth {batch:.2f}x against four ESP-DSP calls and
+The four-position batch is worth {batch:.3f}x against four ESP-DSP calls and
 {own_batch:.2f}x against four calls to our own single dot. Replacing the batch
 with the vendor primitive would add 17 cycles per score, about
 {k_penalty_us:.0f} $\\mu$s per token across {kdot:,} scores.
 
 The vendor long dot is {long_two / long_dsp:.2f}x faster per block than the
 two-load kernel ({long_dsp:.2f} against {long_two:.2f} cycles), which is why
-the fused loop was adopted. The fused kernel matches the vendor loop
+the fused loop was adopted. The fused v1.2.0 kernel matches the vendor loop
 ({long_fused:.2f} against {long_dsp:.2f} cycles per block) without the vendor
-prologue, so it also wins at short lengths.
+prologue, so it also wins at short lengths. On this workload the final kernel
+is equivalent to ESP-DSP, not slower than it.
+
+Correctness: each build prints 22 `CHECK` assertions. One check is one `CHECK`
+line; the aggregate `MICRO correctness PASS` line summarises those 22 and is
+not a 23rd check.
 
 ## End-to-end A/B
 
@@ -267,8 +272,8 @@ is {min(new['runs']):.2f} to {max(new['runs']):.2f} tokens/s
 ## Conclusion
 
 The vendor long dot was {long_two / long_dsp:.2f}x faster per block than the
-two-load kernel, and adopting its fused load moved the V phase from
-{base['phases']['vdot']:.1f} to {new['phases']['vdot']:.1f} $\\mu$s of core time
+two-load kernel. Adopting its fused load closed that gap and moved the V phase
+from {base['phases']['vdot']:.1f} to {new['phases']['vdot']:.1f} $\\mu$s of core time
 ({(new['phases']['vdot'] / base['phases']['vdot'] - 1) * 100:+.1f}%), worth
 {(new['tok'] / base['tok'] - 1) * 100:+.2f}% end to end. The rest of the scan
 did not move, which is what the bandwidth analysis predicts: the V dot was the

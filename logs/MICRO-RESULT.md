@@ -39,16 +39,21 @@ four-position batch are unchanged between the two builds.
 | ESP-DSP | len 128 | 8 | 56.03 | 7.00 |
 | ESP-DSP | len 496 | 31 | 128.08 | 4.13 |
 
-The four-position batch is worth 2.06x against four ESP-DSP calls and
+The four-position batch is worth 2.063x against four ESP-DSP calls and
 1.39x against four calls to our own single dot. Replacing the batch
 with the vendor primitive would add 17 cycles per score, about
 1406 $\mu$s per token across 19,840 scores.
 
 The vendor long dot is 2.16x faster per block than the
 two-load kernel (4.13 against 8.91 cycles), which is why
-the fused loop was adopted. The fused kernel matches the vendor loop
+the fused loop was adopted. The fused v1.2.0 kernel matches the vendor loop
 (4.10 against 4.13 cycles per block) without the vendor
-prologue, so it also wins at short lengths.
+prologue, so it also wins at short lengths. On this workload the final kernel
+is equivalent to ESP-DSP, not slower than it.
+
+Correctness: each build prints 22 `CHECK` assertions. One check is one `CHECK`
+line; the aggregate `MICRO correctness PASS` line summarises those 22 and is
+not a 23rd check.
 
 ## End-to-end A/B
 
@@ -76,8 +81,8 @@ is 168.24 to 168.28 tokens/s
 ## Conclusion
 
 The vendor long dot was 2.16x faster per block than the
-two-load kernel, and adopting its fused load moved the V phase from
-1448.4 to 1355.7 $\mu$s of core time
+two-load kernel. Adopting its fused load closed that gap and moved the V phase
+from 1448.4 to 1355.7 $\mu$s of core time
 (-6.4%), worth
 +0.91% end to end. The rest of the scan
 did not move, which is what the bandwidth analysis predicts: the V dot was the

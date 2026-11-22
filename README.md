@@ -43,12 +43,40 @@ docs/          hardware notes and the reproduction procedure
 
 ## Quick start
 
+The paper's primary configuration is the 64 KB D-cache build. From a fresh
+extraction, the tested sequence is:
+
 ```bash
 . $IDF_PATH/export.sh
 cd firmware
 idf.py set-target esp32s3
+cp ../config/sdkconfig.64kb sdkconfig
+idf.py fullclean
 idf.py build
 ```
+
+The default configuration builds the 32 KB D-cache variant. To reproduce the
+paper's primary 64 KB configuration, replace the generated sdkconfig with
+config/sdkconfig.64kb before building, as shown above. The copy overwrites the
+sdkconfig that `set-target` generated, and `fullclean` removes any previous
+build tree.
+
+The 32 KB variant is the baseline used in the cache sweep, not the build behind
+the 168.25 tokens/s headline. To build it, omit the `cp` line and continue from
+the generated `sdkconfig`:
+
+```bash
+. $IDF_PATH/export.sh
+cd firmware
+idf.py set-target esp32s3
+idf.py fullclean
+idf.py build
+```
+
+With ESP-IDF v5.4.4, the 64 KB sequence above reproduces the released image:
+`.flash.text`, `.flash.rodata`, `.dram0.data` and `.iram0.text` are
+byte-identical, and only the build timestamp and image digest in the ESP-IDF
+app descriptor differ.
 
 Flash the application only. The bootloader, partition table and the model
 partition are not touched:
@@ -74,11 +102,14 @@ The full procedure, including the build switches for each experiment, is in
 `dsps_dp_s8` against `llm_dot16_s8`, `llm_dot16x4_s8` and `llm_dot_s8` on
 internal-SRAM buffers. It exists to answer the obvious question: why not use
 the vendor primitive? The answer is in [`logs/MICRO-RESULT.md`](logs/MICRO-RESULT.md).
-On the score shape the batched kernel is 2.06x faster than four vendor calls.
-On the long dot the vendor loop is 2.16x faster per block, so v1.2.0 adopts
-the same fused load in `llm_dot_s8`; an interleaved A/B measured 166.74 to
-168.25 tokens/s (+0.9%) with byte-identical logits. The rest of the scan did
-not move, because the V phase is memory-bound in situ.
+On the score shape the batched kernel is 2.063x faster than four vendor calls.
+On the long dot, ESP-DSP is 2.16x faster per block than the original two-load
+kernel (4.13 against 8.91 cycles). v1.2.0 adopts the same fused load in
+`llm_dot_s8`, which brings it to 4.10 cycles per block and closes the gap: the
+final kernel is equivalent to ESP-DSP on this workload, not slower than it.
+An interleaved A/B measured 166.74 to 168.25 tokens/s (+0.9%) with
+byte-identical logits. The rest of the scan did not move, because the V phase
+is memory-bound in situ.
 
 ## Regenerating the figures
 

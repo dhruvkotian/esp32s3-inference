@@ -15,12 +15,38 @@ tied to this one.
 
 ## Build
 
+The paper's primary configuration is the 64 KB D-cache build. From a fresh
+extraction, the tested sequence is:
+
 ```bash
 . /path/to/esp-idf-v5.4.4/export.sh
 cd firmware
 idf.py set-target esp32s3
+cp ../config/sdkconfig.64kb sdkconfig
+idf.py fullclean
 idf.py build
 ```
+
+The default configuration builds the 32 KB D-cache variant. To reproduce the
+paper's primary 64 KB configuration, replace the generated sdkconfig with
+config/sdkconfig.64kb before building. The copy overwrites the sdkconfig that
+`set-target` generated, and `fullclean` removes any previous build tree.
+
+The 32 KB variant is the baseline used in the cache sweep, not the
+configuration behind the headline result. To build it, omit the `cp` line:
+
+```bash
+. /path/to/esp-idf-v5.4.4/export.sh
+cd firmware
+idf.py set-target esp32s3
+idf.py fullclean
+idf.py build
+```
+
+With ESP-IDF v5.4.4, the 64 KB sequence reproduces the released image:
+`.flash.text`, `.flash.rodata`, `.dram0.data` and `.iram0.text` are
+byte-identical to the v1.2.0 build, and only the build timestamp and image
+digest in the ESP-IDF app descriptor differ.
 
 The CMake project name is `llm_s3_test`, inherited from the earlier tree, so
 the binary is `build/llm_s3_test.bin`. The name is kept unchanged so that the
@@ -92,9 +118,16 @@ maps every row to its capture.
 
 ## Cache variants
 
+The 64 KB, 32 B line, eight-way configuration is the paper's primary build and
+is selected by `config/sdkconfig.64kb` in the Build section above. The default
+`sdkconfig.defaults` and a fresh `idf.py set-target esp32s3` produce the 32 KB
+variant, which is the baseline for the cache sweep.
+
+Switch either configuration with the helper script:
+
 ```bash
-python3 tools/set_cache_cfg.py 32 32   # 32 KB, 32 B lines
-python3 tools/set_cache_cfg.py 64 32   # 64 KB, 32 B lines
+python3 tools/set_cache_cfg.py 32 32   # 32 KB, 32 B lines (baseline)
+python3 tools/set_cache_cfg.py 64 32   # 64 KB, 32 B lines (primary)
 ```
 
 Or copy `config/sdkconfig.32kb` or `config/sdkconfig.64kb` over `sdkconfig`.
@@ -144,6 +177,13 @@ python3 tools/micro_report.py
 The report script reads both captures, fails if they disagree by more than
 0.5%, and regenerates `logs/MICRO-RESULT.md`. The app prints the ESP-DSP tag
 it was built against; it should be `v1.8.2`.
+
+One check is one `CHECK` assertion. Each kernel run prints 22 `CHECK` lines:
+both implementations at six positions on the 16-element score shape (12
+checks), both at lengths 32, 128 and 496 (6 checks), and four positions of the
+batched kernel (4 checks). The aggregate `MICRO correctness PASS` line
+summarises those 22 assertions; it is not a 23rd check. A run that shows 23
+`PASS` strings therefore has 22 checks plus the summary.
 
 This microbenchmark is instruction-level and cache-resident. It does not
 measure the PSRAM scan, and it does not test the ESP-DL Attention module.

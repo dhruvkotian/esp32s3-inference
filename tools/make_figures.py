@@ -27,6 +27,10 @@ plt.rcParams.update({
     "grid.alpha": 0.3,
     "axes.spines.top": False,
     "axes.spines.right": False,
+    # Embed TrueType rather than Type 3 so the figures pass strict PDF
+    # font checks at submission time.
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 # --------------------------------------------------------------------------
