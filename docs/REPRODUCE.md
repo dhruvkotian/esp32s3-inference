@@ -70,6 +70,12 @@ microSD card:
 The firmware opens those paths at boot. A missing file stops the run before
 any timing starts.
 
+The two files are unmodified MIT-licensed copies from Andrej Karpathy's
+tinyllamas release. `model/PROVENANCE.md` records the upstream URLs, the
+SHA-256 hashes, the licence notice and the acquisition commands if you prefer
+to download them yourself. The hashes must match; a different checkpoint is
+not covered by the paper's measurements.
+
 ## Flash
 
 Application only, at `0x10000`:

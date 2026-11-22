@@ -129,6 +129,14 @@ The manifest covers every file in the release except itself. Regenerating a
 figure will change the corresponding hash; that is expected, because PDF
 producers embed timestamps.
 
+## Release packages
+
+| Package | Location | Purpose |
+|---|---|---|
+| Software artifact | this repository at the release tag | Firmware, microbenchmark, logs, figures, manifest and instructions |
+
+The manuscript is maintained separately and is not part of this software release.
+
 ## What this release does and does not reproduce
 
 It reproduces the measurements: the logs are the captures the paper reports,
@@ -145,12 +153,15 @@ configuration is part of the experiment, not an implementation detail.
   [`LICENSE`](LICENSE).
 - Manuscript source, figures and the text of this artifact: **CC BY 4.0**, see
   [`LICENSE-PAPER`](LICENSE-PAPER).
-- `model/stories260K.bin` and `model/tok512.bin` come from
-  [llama2.c](https://github.com/karpathy/llama2.c) under the MIT licence, see
+- `model/stories260K.bin` and `model/tok512.bin` are unmodified copies of
+  Andrej Karpathy's tinyllamas 260K model and tokenizer, distributed under the
+  **MIT licence**. The upstream notice is in [`model/LICENSE`](model/LICENSE);
+  source, hashes, credit and acquisition instructions are in
   [`model/PROVENANCE.md`](model/PROVENANCE.md).
 
-The two licences are deliberately separate. GPL-3.0-only covers the code; it
-does not cover the paper.
+The three licences are deliberately separate. GPL-3.0-only covers the
+firmware and tools; it does not cover the paper or the model files. The model
+files remain MIT and are not relicensed as GPL.
 
 ## Citing
 
