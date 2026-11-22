@@ -3,6 +3,9 @@ firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/dependencies.lock
+micro/build/
+micro/sdkconfig
+micro/sdkconfig.old
 
 # Python
 __pycache__/

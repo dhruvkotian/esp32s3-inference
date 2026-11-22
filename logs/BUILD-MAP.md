@@ -80,3 +80,19 @@ accuracy harness.
   not rows of Table IV.
 - `bench_acc_ref.log` repeats the fp32 dual-core cell with the accuracy harness
   compiled in, to confirm the harness does not perturb the baseline.
+
+## Vendor comparison (Section 4.5, Table 3)
+
+The microbenchmark is a separate app; the two captures below are its only
+source. `tools/micro_report.py` regenerates `logs/MICRO-RESULT.md` from them
+and fails if they disagree by more than 0.5%.
+
+| Case | Raw capture |
+|---|---|
+| all cases, first run | `micro_dsp_vs_ours.log` |
+| all cases, second run | `micro_dsp_vs_ours_run2.log` |
+
+The app is in `micro/`. It links ESP-DSP v1.8.2, which is not vendored here;
+`micro/README.md` gives the clone command and the build switches. The
+`dot_s8.S` in `micro/main/` is a byte-identical copy of
+`firmware/main/dot_s8.S`, so the timed kernels are the released kernels.

@@ -37,6 +37,7 @@ model/         stories260K.bin and tok512.bin, with provenance
 data/          expected.json, the reference logits for the accuracy harness
 logs/          raw UART captures, per-build summaries, figures, BUILD-MAP.md
 tools/         capture, analysis, figure generation, cache configuration
+micro/         separate app: ESP-DSP against the same-tree dot kernels
 docs/          hardware notes and the reproduction procedure
 ```
 
@@ -66,6 +67,16 @@ python3 tools/capture_until.py /dev/ttyACM0 240 logs/bench_mine.log BENCH_DONE
 
 The full procedure, including the build switches for each experiment, is in
 [`docs/REPRODUCE.md`](docs/REPRODUCE.md).
+
+## Vendor comparison
+
+`micro/` is a separate application that links ESP-DSP v1.8.2 and times
+`dsps_dp_s8` against `llm_dot16_s8`, `llm_dot16x4_s8` and `llm_dot_s8` on
+internal-SRAM buffers. It exists to answer the obvious question: why not use
+the vendor primitive? The answer is in [`logs/MICRO-RESULT.md`](logs/MICRO-RESULT.md).
+On the score shape the batched kernel is 2.06x faster than four vendor calls;
+on the long dot the vendor loop is 2.16x faster per block, but that gap is
+worth at most 0.8% of the token because the V phase is memory-bound in situ.
 
 ## Regenerating the figures
 

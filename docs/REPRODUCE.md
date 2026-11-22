@@ -120,6 +120,34 @@ python3 tools/make_figures.py
 The generator reads `logs/` and writes `logs/figs/`. It raises an error if a
 required measurement is absent; it never substitutes a default value.
 
+## Vendor microbenchmark
+
+`micro/` is a separate ESP-IDF application that links ESP-DSP v1.8.2 and times
+`dsps_dp_s8` against the same-tree kernels. Clone the measured tag:
+
+```bash
+git clone --depth 1 --branch v1.8.2 \
+    https://github.com/espressif/esp-dsp.git ../components/esp-dsp
+. $IDF_PATH/export.sh
+cd micro
+idf.py set-target esp32s3
+idf.py build
+```
+
+`CONFIG_DSP_OPTIMIZED` must be `y`. Flash the app only at `0x10000`, capture
+with the marker `MICRO done`, then:
+
+```bash
+python3 tools/micro_report.py
+```
+
+The report script reads both captures, fails if they disagree by more than
+0.5%, and regenerates `logs/MICRO-RESULT.md`. The app prints the ESP-DSP tag
+it was built against; it should be `v1.8.2`.
+
+This microbenchmark is instruction-level and L1-resident. It does not measure
+the PSRAM scan, and it does not test the ESP-DL Attention module.
+
 ## What is not reproduced here
 
 - Energy per token. No shunt was attached to the board.
