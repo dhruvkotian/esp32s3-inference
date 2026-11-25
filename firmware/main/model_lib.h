@@ -26,6 +26,7 @@ typedef enum {
     MODEL_ERR_TOKENIZER = -8,
     MODEL_ERR_NOMEM = -9,
     MODEL_ERR_SANITY = -10,
+    MODEL_ERR_ROLLBACK = -11,
 } model_err_t;
 
 typedef struct {
@@ -86,3 +87,38 @@ int model_commit(model_stage_t *st, llm_t *m, tokenizer_t *tk);
 
 // model_stage_file() + model_commit() + model_stage_free().
 int model_load_m8(const char *path, llm_t *m, tokenizer_t *tk);
+
+// ---- Runtime switch (v1: same shapes and tokenizer) ----------------------
+//
+// The active stage is kept in PSRAM after boot. It is both the compatibility
+// reference and the rollback source, so a failed switch never needs the card
+// again. *m and *tk must outlive the context.
+
+typedef struct {
+    llm_t *m;
+    tokenizer_t *tk;
+    model_stage_t active;
+    bool bound;
+} model_ctx_t;
+
+typedef struct {
+    uint32_t copy_us;
+    uint32_t sanity_us;      // includes the rollback re-check on failure
+    bool rolled_back;
+} model_apply_stats_t;
+
+// Take ownership of a committed stage. Frees any previous active stage.
+int model_bind(model_ctx_t *ctx, model_stage_t *st, llm_t *m, tokenizer_t *tk);
+
+// Release the active stage. Does not touch *m or *tk.
+void model_ctx_free(model_ctx_t *ctx);
+
+// MODEL_OK when st has the same config, tensor layout and byte-identical
+// embedded tokenizer as the active stage. Checked before anything is copied.
+int model_compat(const model_ctx_t *ctx, const model_stage_t *st);
+
+// Copy st into the live arena, run its sanity fingerprint, and make it the
+// active stage. On sanity failure the previous weights are restored from the
+// active stage and verified. Consumes st on every path. Call only when
+// inference is idle; this is not thread-safe and does not allocate.
+int model_apply(model_ctx_t *ctx, model_stage_t *st, model_apply_stats_t *stats);

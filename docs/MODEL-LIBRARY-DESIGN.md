@@ -317,7 +317,8 @@ For v1, runtime swap requires **exact shape match**:
 - same `rows`, `cols`, `stride` for every tensor
 - same tokenizer vocabulary
 
-If any of these differ, return `MODEL_ERR_SHAPE`. Different shapes are a
+If the config or tensor layout differs, return `MODEL_ERR_SHAPE`; a different
+embedded tokenizer returns `MODEL_ERR_TOKENIZER`. Different shapes are a
 boot-time choice, not a runtime swap.
 
 This restriction is what lets the swap be a set of `memcpy()` calls into
@@ -325,30 +326,36 @@ existing buffers, with no allocator activity and no fragmentation risk.
 
 ### 4.2 Staging
 
-Reserve one PSRAM staging buffer of `M8_MAX_BYTES` at boot. The blob is read
-there first, validated, and only then copied into SRAM.
+The blob is read into PSRAM first, validated, and only then copied into SRAM.
+The staging buffer is allocated for the exact file size (290,816 B for the
+current model) at each switch and freed after the copy. `M8_MAX_BYTES` is only
+the validation ceiling; nothing reserves 512 KiB permanently.
 
 Why stage instead of reading directly into SRAM:
 
 - the old model remains intact until the new one is fully validated
 - a short read or bad checksum does not destroy the active model
 - the SD card can be unmounted before the SRAM copy
-- the staging buffer can become the rollback copy if desired
+- the staging buffer becomes the new active blob after a successful switch
 
-PSRAM cost: 512 KiB reserved, out of ~6.9 MB free. That is acceptable.
+The committed active blob is kept in PSRAM, so a failed sanity check can restore
+the previous weights without the card. At most two blobs are live during a
+switch (active + incoming), about 568 KiB for the current model. That is the v1
+rollback mechanism: the old arena is refilled in place from the retained active
+stage, then its sanity fingerprint is re-checked.
 
 ### 4.3 Optional model cache
 
-Once the basic path works, keep the last N validated blobs in PSRAM:
+Not implemented in v1. A future cache would keep the last N validated blobs in
+PSRAM:
 
 - blob ~284 KiB
 - 4 slots ~1.1 MiB
 - 8 slots ~2.3 MiB
 
-An LRU cache with the active model pinned makes a repeat switch a PSRAM copy
-(~5 ms) plus sanity check, instead of a 50 ms mount + 65 ms read + checksum.
-
-Start without the cache. Add it only if measured switch latency matters.
+An LRU cache with the active model pinned would make a repeat switch a PSRAM
+copy (~5 ms) plus sanity check, instead of a mount + read + SHA-256. Add it only
+if measured switch latency matters.
 
 ### 4.4 State to reset on swap
 
@@ -380,6 +387,7 @@ ACTIVE
   -> SWAP_HEADER
   -> SWAP_STAGE
   -> SWAP_VERIFY
+  -> SWAP_COMPAT
   -> SWAP_QUIESCE
   -> SWAP_COPY
   -> SWAP_SANITY
@@ -397,84 +405,91 @@ Any failure before SWAP_QUIESCE
 |---|---|---|---|
 | `BOOT` | load flash default or `default.m8` | `ACTIVE` | flash default |
 | `ACTIVE` | accept requests | `SWAP_MOUNT` on select | — |
-| `SWAP_MOUNT` | mount SD at 40 MHz, 1-bit | `SWAP_HEADER` | `MODEL_ERR_MOUNT`, stay active |
+| `SWAP_MOUNT` | mount SD at 40 MHz, 1-bit | `SWAP_HEADER` | `MODEL_ERR_IO`, stay active |
 | `SWAP_HEADER` | open file, read 4 KiB, validate magic/version/size/CRC | `SWAP_STAGE` | reject, stay active |
 | `SWAP_STAGE` | read payload into PSRAM staging with `read()` 64 KiB | `SWAP_VERIFY` | reject, stay active |
-| `SWAP_VERIFY` | SHA-256 payload, check tensor bounds, shape, tokenizer | `SWAP_QUIESCE` | reject, stay active |
-| `SWAP_QUIESCE` | ensure no inference, no worker, mark busy | `SWAP_COPY` | `MODEL_ERR_BUSY`, stay active |
-| `SWAP_COPY` | unmount SD; copy tensors into existing SRAM buffers; parse tokenizer | `SWAP_SANITY` | `ROLLBACK` |
-| `SWAP_SANITY` | reset state; run fixed prompt; compare top-1 IDs | `ACTIVE` | `ROLLBACK` |
-| `ROLLBACK` | reload previous model from PSRAM cache, SD, or flash | `ACTIVE` | `FLASH_DEFAULT` |
+| `SWAP_VERIFY` | SHA-256 payload, check tensor bounds and tokenizer parse | `SWAP_COMPAT` | reject, stay active |
+| `SWAP_COMPAT` | compare config, every tensor row/col/stride, and embedded tokenizer bytes with the active stage | `SWAP_QUIESCE` | `MODEL_ERR_SHAPE` / `MODEL_ERR_TOKENIZER`, stay active |
+| `SWAP_QUIESCE` | caller guarantees inference is idle; no task switch | `SWAP_COPY` | caller contract (no `BUSY` error in v1) |
+| `SWAP_COPY` | unmount SD; copy tensors into existing SRAM buffers | `SWAP_SANITY` | `ROLLBACK` |
+| `SWAP_SANITY` | run fixed prompt; compare top-32 CRC and greedy ids | `ACTIVE` | `ROLLBACK` |
+| `ROLLBACK` | refill the arena from the retained active PSRAM stage and re-check its fingerprint | `ACTIVE` | `FLASH_DEFAULT` |
 | `FLASH_DEFAULT` | load `0x210000` model | `ACTIVE` | fatal error |
 
-### 5.1 Timing estimate
+### 5.1 Measured timing
+
+100 alternating switches on the S3-CAM, 40 MHz 1-bit SD (`logs/M8-SWITCH-2026-11-25.log`):
 
 ```text
-mount SD at 40 MHz              50 ms
-read 4 KiB header               ~1 ms
-read 284 KiB at 4.36 MB/s       65 ms
-SHA-256 (estimate, to measure)  10–30 ms
-unmount SD                      ~10 ms
-copy PSRAM -> SRAM              ~5 ms
-reset KV                        ~7 ms
-sanity: 5 forwards              ~8 ms
+mount SD at 40 MHz               88.9–89.5 ms
+stage (read + SHA-256 + parse)   233.5–234.2 ms
+copy PSRAM -> SRAM               4.70–4.71 ms
+sanity (12 forwards)             17.02–17.06 ms
 ------------------------------------------------
-total                           ~156–206 ms
+total                            370.0–371.7 ms
 ```
 
-That is a session-change cost, not a per-token cost. If the blob is in the PSRAM
-cache, the switch is roughly **20 ms**.
+`mount_us` is measured from the start of `sd_mount()` to its return. `stage_us`
+covers the 284 KiB `read()` plus payload SHA-256 and structural validation; the
+earlier 65 ms read estimate omitted the checksum. `sanity_us` is 5 prompt
+forwards plus 7 greedy-token forwards. This is a session-change cost, not a
+per-token cost.
 
-The current raw path is about **1.08 s** from `SD mounted` to model availability,
-so this is a 5–9× improvement even before caching.
+The first switch after boot also pays the boot-time SD scan and partition seed
+check; the table above is the steady state.
+
+The previous raw legacy path was about **1.08 s** from `SD mounted` to model
+availability, so the blob path is roughly 3× faster end to end.
 
 ### 5.2 Why the old model survives early failures
 
 `SWAP_MOUNT`, `SWAP_HEADER`, `SWAP_STAGE` and `SWAP_VERIFY` never touch the SRAM
 arena. A missing file, truncated blob, bad checksum or shape mismatch leaves the
-active model fully usable. Only `SWAP_COPY` is destructive, and it is preceded
-by a validated staged copy and a rollback path.
+active model fully usable. `model_compat()` then compares the staged config,
+every tensor row/col/stride, and the embedded tokenizer bytes against the active
+stage before anything is copied.
 
-## 6. API sketch
+Only `SWAP_COPY` is destructive. On a sanity failure the previous weights are
+restored from the retained active stage in PSRAM and that stage's own sanity
+fingerprint is re-run. Rollback does not touch the card, so a bad blob or a card
+removed mid-session cannot leave the device without a working model.
+
+## 6. Implemented API (v1)
 
 ```c
-typedef enum {
-    MODEL_OK = 0,
-    MODEL_ERR_MOUNT,
-    MODEL_ERR_NOT_FOUND,
-    MODEL_ERR_IO,
-    MODEL_ERR_MAGIC,
-    MODEL_ERR_VERSION,
-    MODEL_ERR_SIZE,
-    MODEL_ERR_CRC,
-    MODEL_ERR_SHA,
-    MODEL_ERR_SHAPE,
-    MODEL_ERR_TOKENIZER,
-    MODEL_ERR_BUSY,
-    MODEL_ERR_SANITY,
-    MODEL_ERR_ROLLBACK,
-} model_err_t;
+typedef struct {
+    llm_t *m;
+    tokenizer_t *tk;
+    model_stage_t active;   // committed blob, PSRAM; rollback source
+    bool bound;
+} model_ctx_t;
 
 typedef struct {
-    char     name[32];
-    char     file[64];
-    uint32_t bytes;
-    uint16_t dim;
-    uint16_t hidden_dim;
-    uint16_t n_layers;
-    uint16_t vocab_size;
-    uint8_t  sha_prefix[8];
-} model_info_t;
+    uint32_t copy_us;
+    uint32_t sanity_us;     // includes the rollback re-check on failure
+    bool rolled_back;
+} model_apply_stats_t;
 
-model_err_t model_lib_init(void);
-model_err_t model_lib_scan(model_info_t *out, size_t cap, size_t *count);
-model_err_t model_lib_switch(const char *name_or_file);
-const model_info_t *model_lib_active(void);
+int model_bind(model_ctx_t *ctx, model_stage_t *st, llm_t *m, tokenizer_t *tk);
+void model_ctx_free(model_ctx_t *ctx);
+int model_compat(const model_ctx_t *ctx, const model_stage_t *st);
+int model_apply(model_ctx_t *ctx, model_stage_t *st,
+                model_apply_stats_t *stats);
 ```
 
-`model_lib_switch()` is synchronous and callable only when inference is idle.
-If a request arrives during a switch, return `MODEL_ERR_BUSY` rather than
-blocking the inference task.
+`model_apply()` consumes `st` on every path and returns one of:
+
+```text
+MODEL_OK              new weights copied, sanity passed, stage committed
+MODEL_ERR_SHAPE       config/tensor layout differs; old model untouched
+MODEL_ERR_TOKENIZER   embedded tokenizer differs; old model untouched
+MODEL_ERR_SANITY      copy happened but the fingerprint failed; rolled back
+MODEL_ERR_ROLLBACK    rollback itself failed; caller must reboot
+```
+
+`model_apply()` is synchronous, allocates nothing, and is callable only when
+inference is idle. The SD mount/read/unmount wrapper stays in the application,
+so the library never depends on a mounted filesystem.
 
 ## 7. Failure handling
 
@@ -491,7 +506,8 @@ blocking the inference task.
 | Shape mismatch | dims/rows/stride | reject, keep current |
 | Tokenizer mismatch | embedded tokenizer fails to parse, or its vocab/special-token layout does not match the header | reject, keep current |
 | Copy failure | destination bounds | rollback |
-| Sanity mismatch | top-1 IDs | rollback |
+| Sanity mismatch | top-32 logit CRC + greedy ids | rollback |
+| Rollback failure | restored weights fail their own fingerprint | `MODEL_ERR_ROLLBACK`, caller reboots |
 | Power loss during switch | reboot | flash default |
 | Power loss during download | `.part` file incomplete | ignored; old file intact |
 
@@ -577,13 +593,60 @@ On device, completed 2026-11-25 (`logs/M8-BOOT-2026-11-25.log`):
 | Every rejection falls back to the legacy checkpoint | pass |
 | Board restored: standard image `4c96f65b...`, legacy model partition | pass |
 
+On device, Step 3 runtime switch, completed 2026-11-25
+(`logs/M8-SWITCH-2026-11-25.log`):
+
+Model B is `tools/make_model_variant.py --scale 1.03`, a deterministic synthetic
+variant of the same checkpoint, not a trained model. It has identical config,
+tensor layout and embedded tokenizer, so `model_compat()` accepts it. Its
+step-0 device dump is `logs/M8-ALT-GOLDEN-2026-11-25.log`; re-packing from that
+file reproduces the blob sha256 byte for byte.
+
+| Test | Result |
+|---|---|
+| Model B blob | 290,816 B, sha256 `f9265549...`, fingerprint `0x329da241` |
+| B logits vs A golden, step 0 | all 512 values differ (max delta 1.294) |
+| B greedy ids | coincide with A (uniform scaling is close to a logit rescale); the CRC still discriminates |
+| Boot A, stage B from the `model` partition to `/sdcard/models/alt.m8` | pass |
+| 100 alternating A <-> B switches at 40 MHz | 100/100 `rc=0`, `SWITCH_SUM ok=100 fail=0` |
+| Sanity checks during the run | 51 x A `0xb2f5d2bd`, 50 x B `0x329da241` |
+| Per-switch timing | mount 88.9-89.5 ms, stage 233.5-234.2 ms, copy 4.70-4.71 ms, sanity 17.02-17.06 ms, total 370.0-371.7 ms |
+| Final active model and generation | A active, 12/12 golden ids (`SWITCH_GEN_MATCH=1`) |
+
+Rollback test (`logs/M8-SWITCH-ROLLBACK-2026-11-25.txt`): one bit flipped in B's
+`sanity_logits_crc32`, header CRC recomputed, payload SHA-256 left valid. The
+host verifier still accepts the blob structurally, so the device is the only
+check that catches it.
+
+| Test | Result |
+|---|---|
+| Bad B staged and copied | pass; header CRC and payload SHA-256 are valid |
+| Sanity check | rejected: `0x329da241 != 0x329da240`, `MODEL_ERR_SANITY` |
+| Rollback | previous weights restored from the retained PSRAM stage, A re-verified at `0xb2f5d2bd` |
+| Active model after rollback | A, build `packer1 b0a507e7ad0f`, 12/12 golden ids |
+| Harness markers | `SWITCH_ROLLBACK_OK=1`, `SWITCH_GEN_MATCH=1` |
+| Board restored: standard image `4c96f65b...`, legacy model partition | pass |
+
+Compatibility test (`logs/M8-SWITCH-COMPAT-2026-11-25.txt`): one bit flipped in
+B's embedded tokenizer score, payload SHA-256 and header CRC recomputed. The
+blob stages successfully, then `model_compat()` rejects it before any copy.
+
+| Test | Result |
+|---|---|
+| Staging a same-shape blob with a different tokenizer | pass |
+| Compatibility check | rejected: `switch rejected (tokenizer)`, `MODEL_ERR_TOKENIZER` |
+| Copy / sanity work | `copy=0`, `sanity=0`; the arena was never touched |
+| Active model after rejection | A, 12/12 golden ids (`SWITCH_GEN_MATCH=1`) |
+
 Still open:
 
 1. Remove the card mid-read; needs physical access to the slot, so it remains a
    manual test. The partition path is already covered by the 10-boot soak.
-2. Switch 100 times at 40 MHz; check for read errors and stable timing
-   (Step 3, not yet approved).
-3. Power-cycle during a switch; verify boot falls back cleanly (Step 3).
+2. Power-cycle during a switch; verify boot falls back cleanly.
+3. Exercise `model_compat()` with a real different-shape blob on device. This
+   needs a second trained model; the host-side rules are covered by the header
+   and tensor-table validators.
+4. Directory scan / model listing and NVS last-selected persistence (not in v1).
 
 ## 10. Non-goals for v1
 
@@ -602,12 +665,16 @@ Build v1 in this order:
 1. **Host packer** and header validator. **Done 2026-11-25** — blob, host C
    reference, independent verifier and negative tests all pass.
 2. **Boot-time load** of one `.m8` blob, with logit comparison to the current
-   path against `logs/golden-logits-2026-11-25.log`.
-3. **Directory scan + list + switch** for same-shape models, with flash
-   fallback and rollback.
-4. **40 MHz + `read()`** in the loader. This is a standalone win even before
-   the format exists: it cuts the current 1 MiB load from ~0.8 s to ~0.24 s.
-5. **PSRAM model cache** only if switch latency needs to go below ~100 ms.
+   path against `logs/golden-logits-2026-11-25.log`. **Done 2026-11-25** — the
+   int8 dump is bit-identical for 12 x 512 values.
+3. **Runtime switch** for same-shape models, with in-place refill, PSRAM
+   rollback and flash fallback. **Done 2026-11-25** — 100/100 alternating
+   switches, plus a forced sanity failure that rolled back cleanly. Directory
+   scan/list and NVS persistence remain future work.
+4. **40 MHz + `read()`** in the loader. **Done 2026-11-25** — this is what the
+   blob loader uses; the measured 284 KiB stage is 233 ms including SHA-256.
+5. **PSRAM model cache** only if switch latency needs to go below ~370 ms.
+   Not implemented; the retained active blob already gives the rollback path.
 
 Step 4 can be done independently of the blob and is the lowest-risk firmware
 change: same model, same partition, just a different read API and clock.

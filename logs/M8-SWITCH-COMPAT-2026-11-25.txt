@@ -1,0 +1,45 @@
+# Step 3 compatibility rejection: model B's embedded tokenizer differs by one bit
+# (score byte 277476, 0x00 -> 0x01), payload SHA-256 and header CRC recomputed.
+# Test build: SWITCH_TEST=1, SWITCH_RUNS=1, DUMP_LOGITS=0
+
+I (1098) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (1099) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (1103) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (1110) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+SWITCH_STAGE rc=0 bytes=290816 name=stories260k-q8
+I (1859) llms3: /sdcard/models/default.m8 already on the card (290816 B)
+I (2076) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2076) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2080) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2087) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (2092) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2101) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2109) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2117) llms3: SD unmounted (ESP_OK); internal free=359211 largest=262144
+I (2126) llm: exp/silu tables built in 2553 us
+I (2236) llm: rotary table 512 x 32 built in 108054 us
+W (2237) llm: no contiguous internal slab for 274656 B (largest block 233472 B), allocating biggest-first
+I (2245) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2247) model: tokenizer: vocab=512 max_token_len=7
+I (2268) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2268) llms3: model source: .m8 blob
+CFG dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512 hot=16 psram_weights=0 m8=1
+M8 bytes=290816 prequantized
+I (2283) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2291) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2299) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2368) llms3: SD mounted in 83005 us
+I (2588) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2589) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2593) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2600) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (2605) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2614) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2622) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+W (2630) model: switch rejected (tokenizer); active model untouched
+SWITCH i=0 file=/sdcard/models/alt.m8 rc=-8 mount=89204 stage=233734 copy=0 sanity=0 total=354189 rollback=0 build=packer1 b0a507e7ad0f
+SWITCH_SUM ok=0 fail=1 min_us=0 avg_us=0 max_us=0
+SWITCH_ACTIVE name=stories260k-q8 build=packer1 b0a507e7ad0f
+SWITCH_GEN_MATCH=1
+SWITCH_DONE
+I (2693) main_task: Returned from app_main()

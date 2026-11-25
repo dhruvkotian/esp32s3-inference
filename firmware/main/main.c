@@ -46,12 +46,31 @@
 
 static const char *TAG = "llms3";
 
+// Active stage cache for runtime switching. It holds the active blob in PSRAM
+// so a failed switch can roll back without touching the card.
+static model_ctx_t g_model;
+
 #define SD_MMC_CMD 38
 #define SD_MMC_CLK 39
 #define SD_MMC_D0  40
 #define MODEL_PATH "/sdcard/stories260K.bin"
 #define TOK_PATH   "/sdcard/tok512.bin"
 #define M8_PATH    "/sdcard/models/default.m8"
+#define SWITCH_ALT_PATH "/sdcard/models/alt.m8"
+
+// Runtime-switch harness. Off in normal builds; the test build enables it in
+// bench_cfg.h. M8_TEST_PARTITION_ONLY is test scaffolding too: it boots the
+// partition blob directly, used to capture a new model's golden logits.
+#ifndef SWITCH_TEST
+#define SWITCH_TEST 0
+#endif
+#ifndef SWITCH_RUNS
+#define SWITCH_RUNS 100
+#endif
+#ifndef M8_TEST_PARTITION_ONLY
+#define M8_TEST_PARTITION_ONLY 0
+#endif
+
 // 0 means "use the model's own seq_len" (512 for stories260K). The KV cache is
 // sized from this, so there is no reason to cap it below the trained context.
 #define CTX_TOKENS 0
@@ -436,6 +455,7 @@ static bool sd_ensure_file(const char *path, const char *label)
 // One-time card seeding: if /sdcard/models/default.m8 is missing but the flash
 // model partition holds a length-prefixed .m8 blob, write it out. This is a
 // transport for the first flash of a new blob; the normal boot path only reads.
+#if !M8_TEST_PARTITION_ONLY
 static void m8_stage_from_partition(void)
 {
     struct stat st;
@@ -460,6 +480,7 @@ static void m8_stage_from_partition(void)
     }
     model_stage_free(&stage);
 }
+#endif
 
 // Boot the model. Prefers /sdcard/models/default.m8 and falls back to the
 // legacy fp32 checkpoint plus tok512.bin.
@@ -472,10 +493,12 @@ static void m8_stage_from_partition(void)
 //
 // Consumes `card`: unmounts it when `sd_ok` is true. On success *out_m and
 // *out_tk are live and owned by the caller; legacy mode also leaves the fp32
-// checkpoint in m->raw for the reference path.
+// checkpoint in m->raw for the reference path. When sw_ctx is non-NULL, the
+// committed .m8 stage is moved into it so runtime switching has a rollback
+// source.
 static bool boot_model(sdmmc_card_t *card, bool sd_ok, int ctx,
                        llm_t **out_m, tokenizer_t *out_tk, bool *out_m8,
-                       size_t *out_m8_bytes)
+                       size_t *out_m8_bytes, model_ctx_t *sw_ctx)
 {
     *out_m = NULL;
     *out_m8 = false;
@@ -485,12 +508,14 @@ static bool boot_model(sdmmc_card_t *card, bool sd_ok, int ctx,
     model_stage_t st;
     memset(&st, 0, sizeof(st));
     int m8rc = MODEL_ERR_IO;
+#if !M8_TEST_PARTITION_ONLY
     if (sd_ok) {
         // Seed the card from the flash partition on the first boot after a
         // blob was written there. No-op when the file already exists.
         m8_stage_from_partition();
         m8rc = model_stage_file(M8_PATH, &st);
     }
+#endif
     // The partition is a real fallback, not just a transport: with no card, or
     // with a card that has no valid file, boot the blob straight from flash.
     if (m8rc != MODEL_OK) {
@@ -545,14 +570,22 @@ static bool boot_model(sdmmc_card_t *card, bool sd_ok, int ctx,
     if (m8rc == MODEL_OK) {
         size_t bytes = st.file_bytes;
         int rc = model_commit(&st, m, out_tk);
-        model_stage_free(&st);
         if (rc == MODEL_OK) {
+            if (sw_ctx) {
+                if (model_bind(sw_ctx, &st, m, out_tk) != MODEL_OK) {
+                    ESP_LOGW(TAG, "switch context bind failed; switching disabled");
+                    model_stage_free(&st);
+                }
+            } else {
+                model_stage_free(&st);
+            }
             ESP_LOGI(TAG, "model source: .m8 blob");
             *out_m = m;
             *out_m8 = true;
             *out_m8_bytes = bytes;
             return true;
         }
+        model_stage_free(&st);
         ESP_LOGW(TAG, ".m8 commit failed (%s); retrying the legacy path",
                  model_strerror(rc));
         // Only reachable if the card has a blob but not a working legacy copy.
@@ -711,6 +744,116 @@ static int match_expected(const gen_result_t *r){
     }
     return -1;
 }
+
+#if SWITCH_TEST
+typedef struct {
+    uint32_t mount_us;
+    uint32_t stage_us;
+    uint32_t copy_us;
+    uint32_t sanity_us;
+    uint32_t total_us;
+    bool rolled_back;
+} switch_stats_t;
+
+// Test-only provisioning: copy the blob in the flash model partition to
+// /sdcard/models/alt.m8. Called with the card mounted, before boot_model().
+// Overwrites, so a new test blob always replaces the previous one.
+static void switch_stage_partition_to_alt(void)
+{
+    model_stage_t st;
+    int rc = model_stage_partition("model", &st);
+    if (rc != MODEL_OK) {
+        printf("SWITCH_STAGE rc=%d (%s)\n", rc, model_strerror(rc));
+        fflush(stdout);
+        return;
+    }
+    mkdir("/sdcard/models", 0777);
+    rc = model_stage_save(&st, SWITCH_ALT_PATH);
+    printf("SWITCH_STAGE rc=%d bytes=%u name=%s\n", rc,
+           (unsigned)st.file_bytes, st.name);
+    model_stage_free(&st);
+    fflush(stdout);
+}
+
+// One full session-change: mount, stage from the card, unmount, apply.
+static int switch_model_file(model_ctx_t *ctx, const char *path,
+                             switch_stats_t *s)
+{
+    memset(s, 0, sizeof(*s));
+    int64_t t0 = esp_timer_get_time();
+    sdmmc_card_t *card = NULL;
+    if (!sd_mount(&card)) {
+        s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+        return MODEL_ERR_IO;
+    }
+    int64_t t1 = esp_timer_get_time();
+    model_stage_t st;
+    int rc = model_stage_file(path, &st);
+    int64_t t2 = esp_timer_get_time();
+    esp_vfs_fat_sdcard_unmount("/sdcard", card);
+    s->mount_us = (uint32_t)(t1 - t0);
+    s->stage_us = (uint32_t)(t2 - t1);
+    if (rc != MODEL_OK) {
+        s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+        return rc;
+    }
+    model_apply_stats_t a;
+    rc = model_apply(ctx, &st, &a);
+    s->copy_us = a.copy_us;
+    s->sanity_us = a.sanity_us;
+    s->rolled_back = a.rolled_back;
+    s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+    return rc;
+}
+
+static void switch_test(model_ctx_t *ctx)
+{
+    printf("SWITCH start runs=%d active=%s\n", SWITCH_RUNS, ctx->active.name);
+    fflush(stdout);
+    int ok = 0, fail = 0, last_rc = MODEL_OK;
+    uint32_t min_us = 0xffffffffu, max_us = 0;
+    uint64_t sum_us = 0;
+
+    for (int i = 0; i < SWITCH_RUNS; i++) {
+        const char *path = (i & 1) ? M8_PATH : SWITCH_ALT_PATH;
+        switch_stats_t s;
+        last_rc = switch_model_file(ctx, path, &s);
+        printf("SWITCH i=%d file=%s rc=%d mount=%u stage=%u copy=%u "
+               "sanity=%u total=%u rollback=%d build=%s\n",
+               i, path, last_rc, (unsigned)s.mount_us, (unsigned)s.stage_us,
+               (unsigned)s.copy_us, (unsigned)s.sanity_us,
+               (unsigned)s.total_us, s.rolled_back ? 1 : 0,
+               ctx->active.build_id);
+        fflush(stdout);
+        if (last_rc != MODEL_OK) {
+            fail++;
+            break;
+        }
+        ok++;
+        if (s.total_us < min_us) min_us = s.total_us;
+        if (s.total_us > max_us) max_us = s.total_us;
+        sum_us += s.total_us;
+    }
+
+    printf("SWITCH_SUM ok=%d fail=%d min_us=%u avg_us=%u max_us=%u\n",
+           ok, fail, ok ? (unsigned)min_us : 0,
+           ok ? (unsigned)(sum_us / (uint64_t)ok) : 0, (unsigned)max_us);
+    printf("SWITCH_ACTIVE name=%s build=%s\n",
+           ctx->active.name, ctx->active.build_id);
+
+    // The active model must still be the boot model and still produce the
+    // golden ids, whether the last switch succeeded or rolled back.
+    gen_result_t g;
+    run_gen(ctx->m, ctx->tk, "Once upon a time", GEN_TOKENS, true, &g);
+    int match = match_expected(&g) < 0;
+    printf("SWITCH_GEN_MATCH=%d\n", match ? 1 : 0);
+    if (last_rc == MODEL_ERR_SANITY) {
+        printf("SWITCH_ROLLBACK_OK=%d\n", match ? 1 : 0);
+    }
+    printf("SWITCH_DONE\n");
+    fflush(stdout);
+}
+#endif
 
 static volatile uint32_t g_bench_sink;
 
@@ -1099,11 +1242,21 @@ static void bench_main(void)
     sdmmc_card_t *card = NULL;
     bool sd_ok = sd_mount(&card);
 
+#if SWITCH_TEST
+    // Provision the second model from the partition while the card is mounted.
+    if (sd_ok) {
+        switch_stage_partition_to_alt();
+    }
+    model_ctx_t *sw_ctx = &g_model;
+#else
+    model_ctx_t *sw_ctx = NULL;
+#endif
+
     llm_t *m = NULL;
     tokenizer_t tk;
     bool m8 = false;
     size_t m8_bytes = 0;
-    if (!boot_model(card, sd_ok, 0, &m, &tk, &m8, &m8_bytes)) {
+    if (!boot_model(card, sd_ok, 0, &m, &tk, &m8, &m8_bytes, sw_ctx)) {
         printf("FATAL no model\n");
         return;
     }
@@ -1114,6 +1267,19 @@ static void bench_main(void)
     if (m8) {
         printf("M8 bytes=%u prequantized\n", (unsigned)m8_bytes);
     }
+
+#if SWITCH_TEST
+    if (!m8 || !g_model.bound) {
+        printf("SWITCH requires an .m8 boot with a bound context\n");
+        printf("SWITCH_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    switch_test(&g_model);
+    printf("BENCH_DONE\n");
+    fflush(stdout);
+    return;
+#endif
 
     if (!m8) {
         int64_t tq = esp_timer_get_time();
@@ -1233,7 +1399,7 @@ void app_main(void)
     bool m8 = false;
     llm_t *m = NULL;
     tokenizer_t tk;
-    if (!boot_model(card, sd_ok, CTX_TOKENS, &m, &tk, &m8, &m8_bytes)) {
+    if (!boot_model(card, sd_ok, CTX_TOKENS, &m, &tk, &m8, &m8_bytes, &g_model)) {
         ESP_LOGE(TAG, "no model available; stopping");
         return;
     }

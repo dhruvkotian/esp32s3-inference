@@ -1,9 +1,10 @@
 // Boot-time loader for the prequantized .m8 model format.
 //
 // The format is produced by tools/pack_model_m8.py and documented in
-// docs/MODEL-LIBRARY-DESIGN.md. Everything here is read-only with respect to
-// the card and the flash: the blob is copied into the existing int8 arena and
-// the embedded tokenizer is parsed into the usual tokenizer_t.
+// docs/MODEL-LIBRARY-DESIGN.md. Loading is read-only with respect to the card
+// and flash: the blob is copied into the existing int8 arena and the embedded
+// tokenizer is parsed into the usual tokenizer_t. model_stage_save() is the
+// only writer, used once to seed the card from the flash partition.
 //
 // Validation order is deliberate: magic/size/header-CRC first (cheap), then
 // payload SHA-256, then tensor bounds and shapes, then the semantic tokenizer
@@ -23,6 +24,7 @@
 #include "esp_log.h"
 #include "esp_partition.h"
 #include "esp_rom_crc.h"
+#include "esp_timer.h"
 #include "mbedtls/sha256.h"
 
 static const char *TAG = "model";
@@ -356,6 +358,7 @@ const char *model_strerror(int rc)
     case MODEL_ERR_TOKENIZER: return "tokenizer";
     case MODEL_ERR_NOMEM:     return "nomem";
     case MODEL_ERR_SANITY:    return "sanity";
+    case MODEL_ERR_ROLLBACK:  return "rollback";
     default:                  return "?";
     }
 }
@@ -585,6 +588,39 @@ static int m8_sanity(const model_stage_t *st, llm_t *m)
     return MODEL_OK;
 }
 
+// Copy the staged q/scales/norms into an already-allocated arena. The caller
+// guarantees the layout fits: model_commit has just allocated it, and
+// model_compat has compared it to the active model. Does not allocate or free.
+static int copy_stage_into_llm(const model_stage_t *st, llm_t *m)
+{
+    for (int i = 0; i < st->tensor_count; i++) {
+        const m8_tensor_t *t = &st->tensors[i];
+        if (t->flags & M8_T_Q8) {
+            qmat_t *q = qmat_for(m, t->id);
+            if (!q || q->rows != (int)t->rows || q->cols != (int)t->cols ||
+                q->stride != (int)t->stride) {
+                ESP_LOGE(TAG, "tensor id=%u does not fit the arena", t->id);
+                return MODEL_ERR_SHAPE;
+            }
+            memcpy(q->q, st->payload + t->data_offset, t->data_bytes);
+            memcpy(q->scale, st->payload + t->scale_offset, t->scale_bytes);
+        } else {
+            float *dst;
+            if (t->id == 9) {
+                dst = m->rms_store;
+            } else if (t->id == 10) {
+                dst = m->rms_store + (size_t)st->layers * st->dim;
+            } else if (t->id == 11) {
+                dst = m->rms_store + (size_t)2 * st->layers * st->dim;
+            } else {
+                return MODEL_ERR_SHAPE;
+            }
+            memcpy(dst, st->payload + t->data_offset, t->data_bytes);
+        }
+    }
+    return MODEL_OK;
+}
+
 int model_commit(model_stage_t *st, llm_t *m, tokenizer_t *tk)
 {
     memset(tk, 0, sizeof(*tk));
@@ -616,32 +652,9 @@ int model_commit(model_stage_t *st, llm_t *m, tokenizer_t *tk)
         return MODEL_ERR_NOMEM;
     }
 
-    for (int i = 0; i < st->tensor_count; i++) {
-        const m8_tensor_t *t = &st->tensors[i];
-        if (t->flags & M8_T_Q8) {
-            qmat_t *q = qmat_for(m, t->id);
-            if (!q || q->rows != (int)t->rows || q->cols != (int)t->cols ||
-                q->stride != (int)t->stride) {
-                ESP_LOGE(TAG, "tensor id=%u does not fit the arena", t->id);
-                llm_free_state(m);
-                return MODEL_ERR_SHAPE;
-            }
-            memcpy(q->q, st->payload + t->data_offset, t->data_bytes);
-            memcpy(q->scale, st->payload + t->scale_offset, t->scale_bytes);
-        } else {
-            float *dst;
-            if (t->id == 9) {
-                dst = m->rms_store;
-            } else if (t->id == 10) {
-                dst = m->rms_store + (size_t)st->layers * st->dim;
-            } else if (t->id == 11) {
-                dst = m->rms_store + (size_t)2 * st->layers * st->dim;
-            } else {
-                llm_free_state(m);
-                return MODEL_ERR_SHAPE;
-            }
-            memcpy(dst, st->payload + t->data_offset, t->data_bytes);
-        }
+    if (copy_stage_into_llm(st, m) != MODEL_OK) {
+        llm_free_state(m);
+        return MODEL_ERR_SHAPE;
     }
     m->int8_ready = true;
     llm_int8_report(m);
@@ -674,4 +687,134 @@ int model_load_m8(const char *path, llm_t *m, tokenizer_t *tk)
     rc = model_commit(&st, m, tk);
     model_stage_free(&st);
     return rc;
+}
+
+int model_bind(model_ctx_t *ctx, model_stage_t *st, llm_t *m, tokenizer_t *tk)
+{
+    if (!ctx || !st || !st->blob || !m || !tk) {
+        return MODEL_ERR_IO;
+    }
+    model_ctx_free(ctx);
+    ctx->m = m;
+    ctx->tk = tk;
+    ctx->active = *st;
+    memset(st, 0, sizeof(*st));
+    ctx->bound = true;
+    return MODEL_OK;
+}
+
+void model_ctx_free(model_ctx_t *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+    model_stage_free(&ctx->active);
+    ctx->m = NULL;
+    ctx->tk = NULL;
+    ctx->bound = false;
+}
+
+static bool stage_same_layout(const model_stage_t *a, const model_stage_t *b)
+{
+    if (a->dim != b->dim || a->hidden != b->hidden ||
+        a->layers != b->layers || a->heads != b->heads ||
+        a->kv_heads != b->kv_heads || a->vocab != b->vocab ||
+        a->seq != b->seq || a->ctx != b->ctx) {
+        return false;
+    }
+    if (a->q_bytes != b->q_bytes || a->scale_bytes != b->scale_bytes ||
+        a->norm_bytes != b->norm_bytes ||
+        a->tensor_count != b->tensor_count) {
+        return false;
+    }
+    for (int i = 0; i < a->tensor_count; i++) {
+        const m8_tensor_t *x = &a->tensors[i];
+        const m8_tensor_t *y = &b->tensors[i];
+        if (x->id != y->id || x->flags != y->flags ||
+            x->rows != y->rows || x->cols != y->cols ||
+            x->stride != y->stride || x->data_bytes != y->data_bytes ||
+            x->scale_bytes != y->scale_bytes) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int model_compat(const model_ctx_t *ctx, const model_stage_t *st)
+{
+    if (!ctx || !ctx->bound || !st) {
+        return MODEL_ERR_IO;
+    }
+    if (!stage_same_layout(&ctx->active, st)) {
+        return MODEL_ERR_SHAPE;
+    }
+    // v1 requires the same vocabulary. The packer embeds the tokenizer file
+    // verbatim, so byte identity is the cheap, strict form of that rule.
+    if (st->tok_bytes != ctx->active.tok_bytes ||
+        memcmp(st->payload + st->tok_off,
+               ctx->active.payload + ctx->active.tok_off,
+               st->tok_bytes) != 0) {
+        return MODEL_ERR_TOKENIZER;
+    }
+    return MODEL_OK;
+}
+
+int model_apply(model_ctx_t *ctx, model_stage_t *st, model_apply_stats_t *stats)
+{
+    model_apply_stats_t local;
+    if (!stats) {
+        stats = &local;
+    }
+    memset(stats, 0, sizeof(*stats));
+    if (!ctx || !ctx->bound || !st) {
+        model_stage_free(st);
+        return MODEL_ERR_IO;
+    }
+
+    int rc = model_compat(ctx, st);
+    if (rc != MODEL_OK) {
+        ESP_LOGW(TAG, "switch rejected (%s); active model untouched",
+                 model_strerror(rc));
+        model_stage_free(st);
+        return rc;
+    }
+
+    int64_t t0 = esp_timer_get_time();
+    rc = copy_stage_into_llm(st, ctx->m);
+    stats->copy_us = (uint32_t)(esp_timer_get_time() - t0);
+    if (rc != MODEL_OK) {
+        // Unreachable after model_compat, but never leave a half-copied arena.
+        copy_stage_into_llm(&ctx->active, ctx->m);
+        model_stage_free(st);
+        return rc;
+    }
+
+    t0 = esp_timer_get_time();
+    rc = m8_sanity(st, ctx->m);
+    stats->sanity_us = (uint32_t)(esp_timer_get_time() - t0);
+    if (rc != MODEL_OK) {
+        ESP_LOGW(TAG, "switch sanity failed; restoring the previous model");
+        int64_t tr = esp_timer_get_time();
+        int rr = copy_stage_into_llm(&ctx->active, ctx->m);
+        if (rr == MODEL_OK) {
+            rr = m8_sanity(&ctx->active, ctx->m);
+        }
+        stats->sanity_us += (uint32_t)(esp_timer_get_time() - tr);
+        stats->rolled_back = true;
+        model_stage_free(st);
+        if (rr != MODEL_OK) {
+            ESP_LOGE(TAG, "rollback verification failed (%s)",
+                     model_strerror(rr));
+            return MODEL_ERR_ROLLBACK;
+        }
+        return rc;
+    }
+
+    // The new blob becomes the rollback source for the next switch.
+    model_stage_free(&ctx->active);
+    ctx->active = *st;
+    memset(st, 0, sizeof(*st));
+    ESP_LOGI(TAG, "model switch ok: %s (%u B)", ctx->active.name,
+             (unsigned)ctx->active.file_bytes);
+    return MODEL_OK;
 }

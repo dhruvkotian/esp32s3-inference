@@ -1,0 +1,734 @@
+# Step 3 runtime switch soak: 100 alternating A <-> B switches
+# Board: ESP32-S3-CAM, 8 MB octal PSRAM, 16 MB flash, SD 40 MHz 1-bit
+# A: /sdcard/models/default.m8 (stories260k-q8, crc 0xb2f5d2bd)
+# B: /sdcard/models/alt.m8 (synthetic scale=1.03, crc 0x329da241)
+# Test build: SWITCH_TEST=1, SWITCH_RUNS=100, DUMP_LOGITS=0
+
+I (1099) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (1099) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (1103) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (1110) model:   sanity prompt=5 top32 crc=0x329da241
+SWITCH_STAGE rc=0 bytes=290816 name=Alt scaled 1.03
+I (1858) llms3: /sdcard/models/default.m8 already on the card (290816 B)
+I (2075) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2075) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2079) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2087) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (2117) llms3: SD unmounted (ESP_OK); internal free=359211 largest=262144
+I (2244) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2267) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2268) llms3: model source: .m8 blob
+CFG dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512 hot=16 psram_weights=0 m8=1
+M8 bytes=290816 prequantized
+SWITCH start runs=100 active=stories260k-q8
+I (2588) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (2589) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2593) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2600) model:   sanity prompt=5 top32 crc=0x329da241
+I (2652) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (2652) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=0 file=/sdcard/models/alt.m8 rc=0 mount=89490 stage=233715 copy=4701 sanity=17044 total=370901 rollback=0 build=synthetic scale=1.03
+I (2971) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2971) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2975) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2983) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (3035) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (3035) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=1 file=/sdcard/models/default.m8 rc=0 mount=88853 stage=233554 copy=4703 sanity=17030 total=369999 rollback=0 build=packer1 b0a507e7ad0f
+I (3354) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (3355) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (3359) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (3366) model:   sanity prompt=5 top32 crc=0x329da241
+I (3418) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (3418) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=2 file=/sdcard/models/alt.m8 rc=0 mount=89332 stage=233774 copy=4699 sanity=17048 total=370810 rollback=0 build=synthetic scale=1.03
+I (3737) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (3737) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (3742) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (3749) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (3801) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (3801) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=3 file=/sdcard/models/default.m8 rc=0 mount=88882 stage=233599 copy=4703 sanity=17024 total=370068 rollback=0 build=packer1 b0a507e7ad0f
+I (4120) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (4121) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (4125) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (4132) model:   sanity prompt=5 top32 crc=0x329da241
+I (4184) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (4184) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=4 file=/sdcard/models/alt.m8 rc=0 mount=89058 stage=233854 copy=4700 sanity=17037 total=370604 rollback=0 build=synthetic scale=1.03
+I (4503) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (4503) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (4507) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (4515) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (4567) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (4567) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=5 file=/sdcard/models/default.m8 rc=0 mount=88987 stage=233587 copy=4703 sanity=17032 total=370169 rollback=0 build=packer1 b0a507e7ad0f
+I (4886) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (4887) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (4891) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (4898) model:   sanity prompt=5 top32 crc=0x329da241
+I (4950) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (4950) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=6 file=/sdcard/models/alt.m8 rc=0 mount=89251 stage=233795 copy=4699 sanity=17048 total=370750 rollback=0 build=synthetic scale=1.03
+I (5269) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (5269) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (5274) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (5281) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (5333) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (5333) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=7 file=/sdcard/models/default.m8 rc=0 mount=88882 stage=233617 copy=4704 sanity=17042 total=370104 rollback=0 build=packer1 b0a507e7ad0f
+I (5652) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (5653) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (5657) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (5664) model:   sanity prompt=5 top32 crc=0x329da241
+I (5716) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (5716) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=8 file=/sdcard/models/alt.m8 rc=0 mount=89022 stage=233793 copy=4705 sanity=17038 total=370508 rollback=0 build=synthetic scale=1.03
+I (6035) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (6035) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (6040) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (6047) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (6099) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (6099) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=9 file=/sdcard/models/default.m8 rc=0 mount=89047 stage=233618 copy=4703 sanity=17024 total=370252 rollback=0 build=packer1 b0a507e7ad0f
+I (6418) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (6419) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (6423) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (6430) model:   sanity prompt=5 top32 crc=0x329da241
+I (6482) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (6482) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=10 file=/sdcard/models/alt.m8 rc=0 mount=89251 stage=233773 copy=4699 sanity=17048 total=370728 rollback=0 build=synthetic scale=1.03
+I (6801) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (6801) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (6806) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (6813) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (6865) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (6865) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=11 file=/sdcard/models/default.m8 rc=0 mount=88795 stage=233613 copy=4703 sanity=17041 total=370012 rollback=0 build=packer1 b0a507e7ad0f
+I (7184) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (7185) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (7189) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (7196) model:   sanity prompt=5 top32 crc=0x329da241
+I (7248) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (7248) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=12 file=/sdcard/models/alt.m8 rc=0 mount=88941 stage=233793 copy=4705 sanity=17038 total=370427 rollback=0 build=synthetic scale=1.03
+I (7567) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (7567) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (7571) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (7579) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (7631) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (7631) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=13 file=/sdcard/models/default.m8 rc=0 mount=88960 stage=233596 copy=4702 sanity=17026 total=370144 rollback=0 build=packer1 b0a507e7ad0f
+I (7950) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (7951) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (7955) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (7962) model:   sanity prompt=5 top32 crc=0x329da241
+I (8014) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (8014) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=14 file=/sdcard/models/alt.m8 rc=0 mount=89185 stage=233835 copy=4700 sanity=17031 total=370706 rollback=0 build=synthetic scale=1.03
+I (8333) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (8333) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (8338) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (8345) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (8397) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (8397) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=15 file=/sdcard/models/default.m8 rc=0 mount=88747 stage=233660 copy=4704 sanity=17035 total=370004 rollback=0 build=packer1 b0a507e7ad0f
+I (8716) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (8717) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (8721) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (8728) model:   sanity prompt=5 top32 crc=0x329da241
+I (8780) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (8780) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=16 file=/sdcard/models/alt.m8 rc=0 mount=88904 stage=233856 copy=4699 sanity=17034 total=370450 rollback=0 build=synthetic scale=1.03
+I (9099) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (9099) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (9103) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (9111) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (9163) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (9163) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=17 file=/sdcard/models/default.m8 rc=0 mount=88901 stage=233593 copy=4704 sanity=17027 total=370084 rollback=0 build=packer1 b0a507e7ad0f
+I (9482) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (9483) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (9487) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (9494) model:   sanity prompt=5 top32 crc=0x329da241
+I (9546) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (9546) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=18 file=/sdcard/models/alt.m8 rc=0 mount=89184 stage=233775 copy=4699 sanity=17048 total=370663 rollback=0 build=synthetic scale=1.03
+I (9865) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (9865) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (9870) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (9877) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (9929) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (9929) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=19 file=/sdcard/models/default.m8 rc=0 mount=88795 stage=233656 copy=4704 sanity=17035 total=370048 rollback=0 build=packer1 b0a507e7ad0f
+I (10248) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (10249) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (10253) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (10260) model:   sanity prompt=5 top32 crc=0x329da241
+I (10313) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (10313) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=20 file=/sdcard/models/alt.m8 rc=0 mount=88991 stage=234133 copy=4704 sanity=17039 total=371251 rollback=0 build=synthetic scale=1.03
+I (10632) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (10632) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (10637) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (10644) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (10696) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (10697) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=21 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233941 copy=4704 sanity=17047 total=371170 rollback=0 build=packer1 b0a507e7ad0f
+I (11016) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (11017) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (11021) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (11029) model:   sanity prompt=5 top32 crc=0x329da241
+I (11081) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (11081) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=22 file=/sdcard/models/alt.m8 rc=0 mount=89363 stage=234132 copy=4705 sanity=17050 total=371633 rollback=0 build=synthetic scale=1.03
+I (11400) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (11400) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (11405) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (11412) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (11464) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (11465) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=23 file=/sdcard/models/default.m8 rc=0 mount=89023 stage=233920 copy=4703 sanity=17045 total=370985 rollback=0 build=packer1 b0a507e7ad0f
+I (11784) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (11785) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (11789) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (11796) model:   sanity prompt=5 top32 crc=0x329da241
+I (11849) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (11849) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=24 file=/sdcard/models/alt.m8 rc=0 mount=89196 stage=234121 copy=4704 sanity=17050 total=371456 rollback=0 build=synthetic scale=1.03
+I (12168) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (12168) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (12173) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (12180) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (12232) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (12233) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=25 file=/sdcard/models/default.m8 rc=0 mount=89186 stage=233941 copy=4704 sanity=17047 total=371171 rollback=0 build=packer1 b0a507e7ad0f
+I (12552) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (12553) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (12557) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (12565) model:   sanity prompt=5 top32 crc=0x329da241
+I (12617) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (12617) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=26 file=/sdcard/models/alt.m8 rc=0 mount=89363 stage=234138 copy=4705 sanity=17050 total=371640 rollback=0 build=synthetic scale=1.03
+I (12936) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (12936) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (12941) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (12948) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (13000) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (13001) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=27 file=/sdcard/models/default.m8 rc=0 mount=89016 stage=233936 copy=4703 sanity=17057 total=371006 rollback=0 build=packer1 b0a507e7ad0f
+I (13320) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (13321) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (13325) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (13332) model:   sanity prompt=5 top32 crc=0x329da241
+I (13385) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (13385) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=28 file=/sdcard/models/alt.m8 rc=0 mount=89168 stage=234193 copy=4705 sanity=17041 total=371490 rollback=0 build=synthetic scale=1.03
+I (13704) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (13705) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (13709) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (13716) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (13768) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (13769) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=29 file=/sdcard/models/default.m8 rc=0 mount=89123 stage=233996 copy=4703 sanity=17052 total=371167 rollback=0 build=packer1 b0a507e7ad0f
+I (14088) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (14089) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (14093) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (14101) model:   sanity prompt=5 top32 crc=0x329da241
+I (14153) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (14153) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=30 file=/sdcard/models/alt.m8 rc=0 mount=89323 stage=234112 copy=4704 sanity=17053 total=371577 rollback=0 build=synthetic scale=1.03
+I (14472) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (14473) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (14477) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (14484) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (14536) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (14537) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=31 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=233953 copy=4703 sanity=17061 total=371029 rollback=0 build=packer1 b0a507e7ad0f
+I (14856) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (14857) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (14861) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (14868) model:   sanity prompt=5 top32 crc=0x329da241
+I (14921) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (14921) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=32 file=/sdcard/models/alt.m8 rc=0 mount=89147 stage=234112 copy=4704 sanity=17052 total=371400 rollback=0 build=synthetic scale=1.03
+I (15240) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (15241) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (15245) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (15252) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (15304) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (15305) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=33 file=/sdcard/models/default.m8 rc=0 mount=89194 stage=234004 copy=4704 sanity=17042 total=371236 rollback=0 build=packer1 b0a507e7ad0f
+I (15624) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (15625) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (15629) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (15637) model:   sanity prompt=5 top32 crc=0x329da241
+I (15689) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (15689) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=34 file=/sdcard/models/alt.m8 rc=0 mount=89303 stage=234139 copy=4705 sanity=17050 total=371581 rollback=0 build=synthetic scale=1.03
+I (16008) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (16009) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (16013) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (16020) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (16072) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (16073) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=35 file=/sdcard/models/default.m8 rc=0 mount=89016 stage=233978 copy=4703 sanity=17052 total=371042 rollback=0 build=packer1 b0a507e7ad0f
+I (16392) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (16393) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (16397) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (16404) model:   sanity prompt=5 top32 crc=0x329da241
+I (16457) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (16457) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=36 file=/sdcard/models/alt.m8 rc=0 mount=89131 stage=234133 copy=4704 sanity=17039 total=371391 rollback=0 build=synthetic scale=1.03
+I (16776) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (16776) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (16781) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (16788) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (16840) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (16841) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=37 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233941 copy=4703 sanity=17047 total=371170 rollback=0 build=packer1 b0a507e7ad0f
+I (17160) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (17161) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (17165) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (17173) model:   sanity prompt=5 top32 crc=0x329da241
+I (17225) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (17225) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=38 file=/sdcard/models/alt.m8 rc=0 mount=89384 stage=234112 copy=4704 sanity=17053 total=371638 rollback=0 build=synthetic scale=1.03
+I (17544) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (17545) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (17549) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (17556) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (17608) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (17609) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=39 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=233953 copy=4703 sanity=17061 total=371029 rollback=0 build=packer1 b0a507e7ad0f
+I (17928) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (17929) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (17933) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (17940) model:   sanity prompt=5 top32 crc=0x329da241
+I (17993) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (17993) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=40 file=/sdcard/models/alt.m8 rc=0 mount=89147 stage=234170 copy=4704 sanity=17055 total=371460 rollback=0 build=synthetic scale=1.03
+I (18312) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (18312) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (18317) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (18324) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (18376) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (18377) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=41 file=/sdcard/models/default.m8 rc=0 mount=89135 stage=233948 copy=4703 sanity=17054 total=371132 rollback=0 build=packer1 b0a507e7ad0f
+I (18696) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (18697) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (18701) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (18709) model:   sanity prompt=5 top32 crc=0x329da241
+I (18761) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (18761) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=42 file=/sdcard/models/alt.m8 rc=0 mount=89350 stage=234134 copy=4705 sanity=17052 total=371625 rollback=0 build=synthetic scale=1.03
+I (19080) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (19081) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (19085) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (19092) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (19144) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (19145) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=43 file=/sdcard/models/default.m8 rc=0 mount=89018 stage=234017 copy=4704 sanity=17038 total=371069 rollback=0 build=packer1 b0a507e7ad0f
+I (19464) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (19465) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (19469) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (19476) model:   sanity prompt=5 top32 crc=0x329da241
+I (19529) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (19529) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=44 file=/sdcard/models/alt.m8 rc=0 mount=89106 stage=234131 copy=4705 sanity=17041 total=371366 rollback=0 build=synthetic scale=1.03
+I (19848) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (19848) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (19853) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (19860) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (19912) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (19913) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=45 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233908 copy=4703 sanity=17043 total=371132 rollback=0 build=packer1 b0a507e7ad0f
+I (20232) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (20233) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (20237) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (20245) model:   sanity prompt=5 top32 crc=0x329da241
+I (20297) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (20297) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=46 file=/sdcard/models/alt.m8 rc=0 mount=89399 stage=234139 copy=4705 sanity=17050 total=371677 rollback=0 build=synthetic scale=1.03
+I (20616) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (20617) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (20621) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (20628) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (20680) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (20681) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=47 file=/sdcard/models/default.m8 rc=0 mount=89016 stage=233977 copy=4703 sanity=17053 total=371042 rollback=0 build=packer1 b0a507e7ad0f
+I (21000) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (21001) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (21005) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (21012) model:   sanity prompt=5 top32 crc=0x329da241
+I (21065) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (21065) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=48 file=/sdcard/models/alt.m8 rc=0 mount=89131 stage=234131 copy=4705 sanity=17041 total=371391 rollback=0 build=synthetic scale=1.03
+I (21384) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (21384) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (21389) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (21396) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (21448) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (21449) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=49 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233908 copy=4703 sanity=17043 total=371132 rollback=0 build=packer1 b0a507e7ad0f
+I (21768) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (21769) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (21773) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (21781) model:   sanity prompt=5 top32 crc=0x329da241
+I (21833) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (21833) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=50 file=/sdcard/models/alt.m8 rc=0 mount=89399 stage=234134 copy=4704 sanity=17053 total=371675 rollback=0 build=synthetic scale=1.03
+I (22152) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (22153) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (22157) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (22164) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (22216) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (22217) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=51 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=233978 copy=4703 sanity=17053 total=371045 rollback=0 build=packer1 b0a507e7ad0f
+I (22536) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (22537) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (22541) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (22548) model:   sanity prompt=5 top32 crc=0x329da241
+I (22601) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (22601) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=52 file=/sdcard/models/alt.m8 rc=0 mount=89131 stage=234114 copy=4705 sanity=17051 total=371385 rollback=0 build=synthetic scale=1.03
+I (22920) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (22920) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (22925) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (22932) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (22984) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (22985) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=53 file=/sdcard/models/default.m8 rc=0 mount=89193 stage=233907 copy=4703 sanity=17043 total=371139 rollback=0 build=packer1 b0a507e7ad0f
+I (23304) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (23305) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (23309) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (23317) model:   sanity prompt=5 top32 crc=0x329da241
+I (23369) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (23369) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=54 file=/sdcard/models/alt.m8 rc=0 mount=89399 stage=234133 copy=4705 sanity=17050 total=371670 rollback=0 build=synthetic scale=1.03
+I (23688) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (23688) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (23693) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (23700) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (23752) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (23753) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=55 file=/sdcard/models/default.m8 rc=0 mount=89023 stage=233920 copy=4703 sanity=17045 total=370985 rollback=0 build=packer1 b0a507e7ad0f
+I (24072) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (24073) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (24077) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (24084) model:   sanity prompt=5 top32 crc=0x329da241
+I (24137) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (24137) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=56 file=/sdcard/models/alt.m8 rc=0 mount=89196 stage=234114 copy=4705 sanity=17051 total=371450 rollback=0 build=synthetic scale=1.03
+I (24456) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (24456) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (24461) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (24468) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (24520) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (24521) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=57 file=/sdcard/models/default.m8 rc=0 mount=89192 stage=233938 copy=4703 sanity=17037 total=371163 rollback=0 build=packer1 b0a507e7ad0f
+I (24840) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (24841) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (24845) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (24853) model:   sanity prompt=5 top32 crc=0x329da241
+I (24905) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (24905) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=58 file=/sdcard/models/alt.m8 rc=0 mount=89399 stage=234097 copy=4705 sanity=17054 total=371639 rollback=0 build=synthetic scale=1.03
+I (25224) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (25225) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (25229) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (25236) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (25288) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (25289) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=59 file=/sdcard/models/default.m8 rc=0 mount=89031 stage=233945 copy=4703 sanity=17055 total=371027 rollback=0 build=packer1 b0a507e7ad0f
+I (25608) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (25609) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (25613) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (25620) model:   sanity prompt=5 top32 crc=0x329da241
+I (25673) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (25673) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=60 file=/sdcard/models/alt.m8 rc=0 mount=89159 stage=234112 copy=4704 sanity=17052 total=371412 rollback=0 build=synthetic scale=1.03
+I (25992) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (25992) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (25997) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (26004) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (26056) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (26057) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=61 file=/sdcard/models/default.m8 rc=0 mount=89193 stage=233908 copy=4703 sanity=17043 total=371140 rollback=0 build=packer1 b0a507e7ad0f
+I (26376) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (26377) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (26381) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (26389) model:   sanity prompt=5 top32 crc=0x329da241
+I (26441) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (26441) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=62 file=/sdcard/models/alt.m8 rc=0 mount=89420 stage=234097 copy=4706 sanity=17055 total=371661 rollback=0 build=synthetic scale=1.03
+I (26760) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (26761) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (26765) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (26772) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (26824) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (26825) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=63 file=/sdcard/models/default.m8 rc=0 mount=89029 stage=233949 copy=4703 sanity=17055 total=371029 rollback=0 build=packer1 b0a507e7ad0f
+I (27144) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (27145) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (27149) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (27156) model:   sanity prompt=5 top32 crc=0x329da241
+I (27209) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (27209) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=64 file=/sdcard/models/alt.m8 rc=0 mount=89159 stage=234110 copy=4705 sanity=17048 total=371405 rollback=0 build=synthetic scale=1.03
+I (27528) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (27528) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (27533) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (27540) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (27592) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (27593) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=65 file=/sdcard/models/default.m8 rc=0 mount=89200 stage=233941 copy=4703 sanity=17046 total=371184 rollback=0 build=packer1 b0a507e7ad0f
+I (27912) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (27913) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (27917) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (27925) model:   sanity prompt=5 top32 crc=0x329da241
+I (27977) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (27977) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=66 file=/sdcard/models/alt.m8 rc=0 mount=89363 stage=234132 copy=4705 sanity=17050 total=371633 rollback=0 build=synthetic scale=1.03
+I (28296) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (28296) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (28301) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (28308) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (28360) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (28361) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=67 file=/sdcard/models/default.m8 rc=0 mount=89023 stage=233919 copy=4703 sanity=17037 total=370975 rollback=0 build=packer1 b0a507e7ad0f
+I (28680) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (28681) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (28685) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (28692) model:   sanity prompt=5 top32 crc=0x329da241
+I (28745) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (28745) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=68 file=/sdcard/models/alt.m8 rc=0 mount=89206 stage=234131 copy=4705 sanity=17041 total=371466 rollback=0 build=synthetic scale=1.03
+I (29064) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (29065) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (29069) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (29076) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (29128) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (29129) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=69 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=234028 copy=4704 sanity=17030 total=371239 rollback=0 build=packer1 b0a507e7ad0f
+I (29448) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (29449) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (29453) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (29461) model:   sanity prompt=5 top32 crc=0x329da241
+I (29513) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (29513) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=70 file=/sdcard/models/alt.m8 rc=0 mount=89313 stage=234122 copy=4705 sanity=17048 total=371572 rollback=0 build=synthetic scale=1.03
+I (29832) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (29833) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (29837) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (29844) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (29896) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (29897) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=71 file=/sdcard/models/default.m8 rc=0 mount=89015 stage=234009 copy=4704 sanity=17030 total=371050 rollback=0 build=packer1 b0a507e7ad0f
+I (30216) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (30217) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (30221) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (30228) model:   sanity prompt=5 top32 crc=0x329da241
+I (30281) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (30281) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=72 file=/sdcard/models/alt.m8 rc=0 mount=89122 stage=234133 copy=4704 sanity=17039 total=371382 rollback=0 build=synthetic scale=1.03
+I (30600) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (30600) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (30605) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (30612) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (30664) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (30665) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=73 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233942 copy=4703 sanity=17046 total=371170 rollback=0 build=packer1 b0a507e7ad0f
+I (30984) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (30985) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (30989) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (30997) model:   sanity prompt=5 top32 crc=0x329da241
+I (31049) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (31049) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=74 file=/sdcard/models/alt.m8 rc=0 mount=89363 stage=234138 copy=4705 sanity=17050 total=371640 rollback=0 build=synthetic scale=1.03
+I (31368) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (31369) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (31373) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (31380) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (31432) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (31433) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=75 file=/sdcard/models/default.m8 rc=0 mount=89016 stage=233949 copy=4703 sanity=17059 total=371020 rollback=0 build=packer1 b0a507e7ad0f
+I (31752) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (31753) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (31757) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (31764) model:   sanity prompt=5 top32 crc=0x329da241
+I (31817) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (31817) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=76 file=/sdcard/models/alt.m8 rc=0 mount=89153 stage=234131 copy=4705 sanity=17041 total=371413 rollback=0 build=synthetic scale=1.03
+I (32136) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (32137) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (32141) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (32148) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (32200) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (32201) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=77 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233968 copy=4703 sanity=17059 total=371208 rollback=0 build=packer1 b0a507e7ad0f
+I (32520) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (32521) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (32525) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (32533) model:   sanity prompt=5 top32 crc=0x329da241
+I (32585) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (32585) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=78 file=/sdcard/models/alt.m8 rc=0 mount=89324 stage=234133 copy=4704 sanity=17053 total=371599 rollback=0 build=synthetic scale=1.03
+I (32904) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (32905) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (32909) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (32916) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (32968) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (32969) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=79 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=234013 copy=4703 sanity=17036 total=371064 rollback=0 build=packer1 b0a507e7ad0f
+I (33288) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (33289) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (33293) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (33300) model:   sanity prompt=5 top32 crc=0x329da241
+I (33353) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (33353) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=80 file=/sdcard/models/alt.m8 rc=0 mount=89112 stage=234133 copy=4704 sanity=17039 total=371372 rollback=0 build=synthetic scale=1.03
+I (33672) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (33672) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (33677) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (33684) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (33736) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (33737) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=81 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233937 copy=4703 sanity=17038 total=371156 rollback=0 build=packer1 b0a507e7ad0f
+I (34056) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (34057) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (34061) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (34069) model:   sanity prompt=5 top32 crc=0x329da241
+I (34121) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (34121) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=82 file=/sdcard/models/alt.m8 rc=0 mount=89376 stage=234139 copy=4705 sanity=17050 total=371654 rollback=0 build=synthetic scale=1.03
+I (34440) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (34441) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (34445) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (34452) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (34504) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (34505) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=83 file=/sdcard/models/default.m8 rc=0 mount=89016 stage=233978 copy=4703 sanity=17053 total=371042 rollback=0 build=packer1 b0a507e7ad0f
+I (34824) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (34825) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (34829) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (34836) model:   sanity prompt=5 top32 crc=0x329da241
+I (34889) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (34889) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=84 file=/sdcard/models/alt.m8 rc=0 mount=89131 stage=234135 copy=4704 sanity=17036 total=371391 rollback=0 build=synthetic scale=1.03
+I (35208) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (35208) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (35213) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (35220) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (35272) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (35273) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=85 file=/sdcard/models/default.m8 rc=0 mount=89185 stage=233940 copy=4704 sanity=17047 total=371168 rollback=0 build=packer1 b0a507e7ad0f
+I (35592) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (35593) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (35597) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (35605) model:   sanity prompt=5 top32 crc=0x329da241
+I (35657) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (35657) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=86 file=/sdcard/models/alt.m8 rc=0 mount=89385 stage=234113 copy=4704 sanity=17053 total=371640 rollback=0 build=synthetic scale=1.03
+I (35976) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (35977) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (35981) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (35988) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (36040) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (36041) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=87 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=234013 copy=4703 sanity=17036 total=371064 rollback=0 build=packer1 b0a507e7ad0f
+I (36360) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (36361) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (36365) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (36372) model:   sanity prompt=5 top32 crc=0x329da241
+I (36425) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (36425) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=88 file=/sdcard/models/alt.m8 rc=0 mount=89112 stage=234227 copy=4705 sanity=17028 total=371457 rollback=0 build=synthetic scale=1.03
+I (36744) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (36745) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (36749) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (36756) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (36808) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (36809) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=89 file=/sdcard/models/default.m8 rc=0 mount=89103 stage=233997 copy=4703 sanity=17051 total=371147 rollback=0 build=packer1 b0a507e7ad0f
+I (37128) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (37129) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (37133) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (37141) model:   sanity prompt=5 top32 crc=0x329da241
+I (37193) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (37193) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=90 file=/sdcard/models/alt.m8 rc=0 mount=89302 stage=234142 copy=4705 sanity=17048 total=371581 rollback=0 build=synthetic scale=1.03
+I (37512) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (37513) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (37517) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (37524) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (37576) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (37577) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=91 file=/sdcard/models/default.m8 rc=0 mount=89015 stage=234009 copy=4704 sanity=17030 total=371050 rollback=0 build=packer1 b0a507e7ad0f
+I (37896) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (37897) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (37901) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (37908) model:   sanity prompt=5 top32 crc=0x329da241
+I (37961) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (37961) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=92 file=/sdcard/models/alt.m8 rc=0 mount=89122 stage=234227 copy=4705 sanity=17028 total=371467 rollback=0 build=synthetic scale=1.03
+I (38280) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (38280) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (38285) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (38292) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (38344) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (38345) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=93 file=/sdcard/models/default.m8 rc=0 mount=89104 stage=233937 copy=4703 sanity=17048 total=371085 rollback=0 build=packer1 b0a507e7ad0f
+I (38664) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (38665) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (38669) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (38677) model:   sanity prompt=5 top32 crc=0x329da241
+I (38729) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (38729) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=94 file=/sdcard/models/alt.m8 rc=0 mount=89386 stage=234121 copy=4705 sanity=17048 total=371644 rollback=0 build=synthetic scale=1.03
+I (39048) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (39049) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (39053) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (39060) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (39112) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (39113) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=95 file=/sdcard/models/default.m8 rc=0 mount=89015 stage=233978 copy=4703 sanity=17052 total=371041 rollback=0 build=packer1 b0a507e7ad0f
+I (39432) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (39433) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (39437) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (39444) model:   sanity prompt=5 top32 crc=0x329da241
+I (39497) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (39497) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=96 file=/sdcard/models/alt.m8 rc=0 mount=89131 stage=234173 copy=4705 sanity=17052 total=371445 rollback=0 build=synthetic scale=1.03
+I (39816) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (39817) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (39821) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (39828) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (39880) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (39881) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=97 file=/sdcard/models/default.m8 rc=0 mount=89132 stage=233967 copy=4704 sanity=17060 total=371155 rollback=0 build=packer1 b0a507e7ad0f
+I (40200) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (40201) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (40205) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (40213) model:   sanity prompt=5 top32 crc=0x329da241
+I (40265) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (40265) model: model switch ok: Alt scaled 1.03 (290816 B)
+SWITCH i=98 file=/sdcard/models/alt.m8 rc=0 mount=89346 stage=234111 copy=4704 sanity=17053 total=371599 rollback=0 build=synthetic scale=1.03
+I (40584) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (40585) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (40589) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (40596) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (40648) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (40649) model: model switch ok: stories260k-q8 (290816 B)
+SWITCH i=99 file=/sdcard/models/default.m8 rc=0 mount=89019 stage=233978 copy=4703 sanity=17053 total=371045 rollback=0 build=packer1 b0a507e7ad0f
+SWITCH_SUM ok=100 fail=0 min_us=369999 avg_us=371121 max_us=371677
+SWITCH_ACTIVE name=stories260k-q8 build=packer1 b0a507e7ad0f
+SWITCH_GEN_MATCH=1
+SWITCH_DONE
+BENCH_DONE
+
+# sanity fingerprints observed (boot + one per successful switch):
+#   crc=0x329da241 count=50
+#   crc=0xb2f5d2bd count=51
+# 100 switch calls: 50 to B, 50 back to A; the boot check adds one A.
+# SWITCH_GEN_MATCH=1 means the final A generation matches the 12 golden ids.

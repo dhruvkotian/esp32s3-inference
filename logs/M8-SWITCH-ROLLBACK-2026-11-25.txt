@@ -1,0 +1,48 @@
+# Step 3 rollback test: B has one bit flipped in sanity_logits_crc32
+# (0x329da241 -> 0x329da240), header CRC recomputed, payload SHA-256 valid.
+# Test build: SWITCH_TEST=1, SWITCH_RUNS=1, DUMP_LOGITS=0
+
+I (1099) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (1099) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (1103) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (1110) model:   sanity prompt=5 top32 crc=0x329da240
+SWITCH_STAGE rc=0 bytes=290816 name=Alt scaled 1.03
+I (1842) llms3: /sdcard/models/default.m8 already on the card (290816 B)
+I (2059) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2060) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2064) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2071) model:   sanity prompt=5 top32 crc=0xb2f5d2bd
+I (2076) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2084) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2093) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2101) llms3: SD unmounted (ESP_OK); internal free=359211 largest=262144
+I (2110) llm: exp/silu tables built in 2551 us
+I (2220) llm: rotary table 512 x 32 built in 108057 us
+W (2220) llm: no contiguous internal slab for 274656 B (largest block 233472 B), allocating biggest-first
+I (2228) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2231) model: tokenizer: vocab=512 max_token_len=7
+I (2252) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2252) llms3: model source: .m8 blob
+CFG dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512 hot=16 psram_weights=0 m8=1
+M8 bytes=290816 prequantized
+I (2266) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2274) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2283) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2352) llms3: SD mounted in 83222 us
+I (2572) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (2573) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2577) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2584) model:   sanity prompt=5 top32 crc=0x329da240
+I (2589) gpio: GPIO[39]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2597) gpio: GPIO[38]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+I (2606) gpio: GPIO[40]| InputEn: 0| OutputEn: 0| OpenDrain: 0| Pullup: 1| Pulldown: 0| Intr:0 
+E (2626) model: sanity CRC 0x329da241 != 0x329da240 (top1=432)
+W (2627) model: switch sanity failed; restoring the previous model
+I (2648) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+SWITCH i=0 file=/sdcard/models/alt.m8 rc=-10 mount=89422 stage=233653 copy=4702 sanity=28452 total=382092 rollback=1 build=packer1 b0a507e7ad0f
+SWITCH_SUM ok=0 fail=1 min_us=0 avg_us=0 max_us=0
+SWITCH_ACTIVE name=stories260k-q8 build=packer1 b0a507e7ad0f
+SWITCH_GEN_MATCH=1
+SWITCH_ROLLBACK_OK=1
+SWITCH_DONE
+I (2700) main_task: Returned from app_main()
