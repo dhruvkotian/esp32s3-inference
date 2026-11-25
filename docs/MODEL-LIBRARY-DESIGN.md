@@ -26,6 +26,8 @@ than a reboot.
 | Where models live | SD card, FATFS, `models/` directory |
 | Where the active model executes | Internal SRAM, existing int8 arena |
 | Where models are staged | PSRAM |
+| Where inactive models are cached | PSRAM, three LRU slots |
+| Last selection | NVS namespace `modellib`, basename only |
 | Format | Prequantized, self-describing `.m8` blob |
 | On-device quantization | Removed from the switch path |
 | Runtime shape changes | Rejected in v1; same-shape models only |
@@ -39,7 +41,7 @@ than a reboot.
 The important separation is:
 
 - **SD** = cold library
-- **PSRAM** = staging and optional model cache
+- **PSRAM** = staging and the inactive-model cache
 - **SRAM** = the only execution tier
 
 ## 2. Blob format
@@ -279,15 +281,17 @@ v1 uses directory scan, not a manifest:
 2. for each `*.m8`, open with `open()`
 3. read 4 KiB header with `read()`
 4. check magic, version, header size, file size, dimensions, tensor table bounds
-5. append `{name, filename, bytes, dims, sha-prefix}` to the list
-6. close and continue
+5. read only the embedded tokenizer (a few KiB) and CRC-32 it
+6. append `{filename, name, bytes, dims, sanity CRC, tokenizer CRC}`
 
 This avoids a manifest that can drift out of sync with the files. The header is
 the source of truth. A full SHA-256 is verified only when a model is loaded, not
-during listing.
+during listing, so a scan costs one 4 KiB read plus one tokenizer read per file.
 
-An optional `models.idx` can be added later for a faster list, but it must not be
-authoritative.
+`model_info_compat()` compares that list entry's config and tokenizer CRC with
+the active model. It is a cheap hint for a UI: mismatched entries would need a
+reboot. The authoritative check still happens in `model_compat()` at apply time,
+including every tensor row/col/stride and a byte comparison of the tokenizer.
 
 ## 4. Runtime memory plan
 
@@ -339,23 +343,40 @@ Why stage instead of reading directly into SRAM:
 - the staging buffer becomes the new active blob after a successful switch
 
 The committed active blob is kept in PSRAM, so a failed sanity check can restore
-the previous weights without the card. At most two blobs are live during a
-switch (active + incoming), about 568 KiB for the current model. That is the v1
-rollback mechanism: the old arena is refilled in place from the retained active
-stage, then its sanity fingerprint is re-checked.
+the previous weights without the card. In steady state the live set is the active
+blob plus up to three cached blobs. A cold switch briefly adds the incoming stage
+as a fifth blob, about 1.40 MiB transiently, and the old active is then either
+cached or evicted. That is the rollback mechanism: the old arena is refilled in
+place from the retained active stage, then its sanity fingerprint is re-checked.
 
-### 4.3 Optional model cache
+### 4.3 PSRAM model cache
 
-Not implemented in v1. A future cache would keep the last N validated blobs in
-PSRAM:
+Implemented 2026-11-25. Three inactive validated blobs stay resident in PSRAM,
+plus the active one:
 
-- blob ~284 KiB
-- 4 slots ~1.1 MiB
-- 8 slots ~2.3 MiB
+```text
+active             290,816 B
+3 cached slots     884,748 B  (294,916 B each, including heap overhead)
+------------------------------
+steady total     1,175,564 B  (~1.12 MiB)
+cold transient   1,470,480 B  (~1.40 MiB, with the incoming stage)
+```
 
-An LRU cache with the active model pinned would make a repeat switch a PSRAM
-copy (~5 ms) plus sanity check, instead of a mount + read + SHA-256. Add it only
-if measured switch latency matters.
+The cache moves, never copies, stages between the active slot and a cache slot.
+Every successful `model_apply()` deposits the model it replaced into the cache,
+so switching back is immediate. Replacement is LRU; a slot is also reused
+directly when the same path is stored again.
+
+Measured on device (`logs/M8-LIB-2026-11-25.log`, `logs/M8-LIB-LRU-2026-11-25.log`):
+
+| Path | Time |
+|---|---:|
+| cold (mount + read + SHA + copy + sanity) | 377–405 ms |
+| cached (copy + sanity) | 29–30 ms |
+
+PSRAM after one cached blob: 6,761,312 B free. With all three slots populated:
+6,171,480 B free. The difference is exactly three 294,916 B allocations, so the
+budget tracks the design and nothing leaks across evictions.
 
 ### 4.4 State to reset on swap
 
@@ -454,13 +475,16 @@ restored from the retained active stage in PSRAM and that stage's own sanity
 fingerprint is re-run. Rollback does not touch the card, so a bad blob or a card
 removed mid-session cannot leave the device without a working model.
 
-## 6. Implemented API (v1)
+## 6. Implemented API (v2: library + cache)
 
 ```c
 typedef struct {
     llm_t *m;
     tokenizer_t *tk;
-    model_stage_t active;   // committed blob, PSRAM; rollback source
+    model_stage_t active;              // committed blob, PSRAM; rollback source
+    model_stage_t cache[MODEL_CACHE_SLOTS];
+    uint32_t cache_tick[MODEL_CACHE_SLOTS];
+    uint32_t tick;
     bool bound;
 } model_ctx_t;
 
@@ -475,6 +499,20 @@ void model_ctx_free(model_ctx_t *ctx);
 int model_compat(const model_ctx_t *ctx, const model_stage_t *st);
 int model_apply(model_ctx_t *ctx, model_stage_t *st,
                 model_apply_stats_t *stats);
+
+// Library: listing and cache
+int model_probe_file(const char *path, model_info_t *info);
+int model_scan_dir(const char *dir, model_info_t *out, size_t cap,
+                   size_t *count);
+int model_info_compat(const model_ctx_t *ctx, const model_info_t *info);
+int model_cache_count(const model_ctx_t *ctx);
+bool model_cache_has(const model_ctx_t *ctx, const char *path);
+int model_cache_find(model_ctx_t *ctx, const char *path, model_stage_t *out);
+int model_cache_put(model_ctx_t *ctx, model_stage_t *st);
+void model_cache_remove(model_ctx_t *ctx, const char *path);
+void model_cache_clear(model_ctx_t *ctx);
+int model_apply_cached(model_ctx_t *ctx, const char *path,
+                       model_apply_stats_t *stats);
 ```
 
 `model_apply()` consumes `st` on every path and returns one of:
@@ -490,6 +528,19 @@ MODEL_ERR_ROLLBACK    rollback itself failed; caller must reboot
 `model_apply()` is synchronous, allocates nothing, and is callable only when
 inference is idle. The SD mount/read/unmount wrapper stays in the application,
 so the library never depends on a mounted filesystem.
+
+`model_apply_cached()` returns `MODEL_ERR_NOTFOUND` when the path is not
+resident, which is the application's signal to mount the card, call
+`model_stage_file()`, and then `model_apply()`. It never touches the filesystem
+itself.
+
+A scanned listing is advisory: `model_info_compat()` uses the config and the
+tokenizer CRC, while `model_apply()` re-checks the full tensor table.
+
+`model_prefs.c` stores the last successful selection in NVS under namespace
+`modellib`, key `last`. It stores only the basename and never a `partition:*`
+pseudo-path. NVS is initialized and deinitialized per call so its page cache does
+not consume internal SRAM while the weights are live.
 
 ## 7. Failure handling
 
@@ -525,19 +576,20 @@ maintenance mode with the model unloaded, or write the card from a host.
 
 ## 8. Boot policy
 
-v1:
+Implemented 2026-11-25:
 
 1. Mount SD at 40 MHz.
-2. Look for `models/default.m8`.
-3. If present and valid, load it.
-4. Otherwise load the flash-partition model at `0x210000`.
-5. If that fails, stop with a clear error.
+2. Seed `models/default.m8` from the flash partition if the file is missing.
+3. Read the NVS last selection and try `models/<last>`.
+4. If that is absent or invalid, try `models/default.m8`.
+5. If that fails, load the flash-partition `.m8` blob at `0x210000`.
+6. If that fails, fall back to the legacy checkpoint.
+7. Persist the basename that actually loaded when it differs from the stored
+   one. A partition fallback never overwrites the user's selection.
 
-Optional later:
-
-- store the last selected model name in NVS
-- on boot, try last selected, then `default.m8`, then flash
-- keep NVS writes out of the inference path
+The NVS read and write are outside the inference path and outside the int8
+arena. A stale or deleted last selection costs one failed open and then falls
+through to `default.m8`.
 
 ## 9. Packer and validation tests
 
@@ -638,6 +690,43 @@ blob stages successfully, then `model_compat()` rejects it before any copy.
 | Copy / sanity work | `copy=0`, `sanity=0`; the arena was never touched |
 | Active model after rejection | A, 12/12 golden ids (`SWITCH_GEN_MATCH=1`) |
 
+On device, model library (A+B), completed 2026-11-25
+(`logs/M8-LIB-2026-11-25.log`, `logs/M8-LIB-NVS-2026-11-25.log`,
+`logs/M8-LIB-LRU-2026-11-25.log`):
+
+The test build provisions `/sdcard/models/alt.m8` from the partition, then
+selects alt -> default -> alt. The first selection is cold, the next two hit the
+PSRAM cache.
+
+| Test | Result |
+|---|---|
+| `model_scan_dir()` on the card | 2 models listed, sorted, both `compat=0` |
+| Header-only probe cost | 4 KiB header + 6,227 B tokenizer per file, no payload read |
+| alt, cold | mount 88.3 ms, stage 233.9 ms, copy 4.7 ms, sanity 17.1 ms, total **377.6 ms** |
+| default, cached | copy 4.6 ms, sanity 17.0 ms, total **29.4 ms** |
+| alt, cached | copy 4.7 ms, sanity 17.0 ms, total **30.0 ms** |
+| Generation after the sequence | 12/12 golden ids (`LIB_GEN match=1`) |
+| End state | alt active, `cache=1/3`, PSRAM free 6,761,312 B |
+| Reboot | `boot: using NVS last model alt.m8`, alt active, 12/12 golden ids |
+| Select `default.m8`, persist, reboot | first pass 394.9 ms then restart; second boot `boot: using NVS last model default.m8`, `LIB_BOOT_CONFIRM default.m8` |
+
+LRU test (`logs/M8-LIB-LRU-2026-11-25.log`), five files, same payload under
+different names:
+
+| Step | Source | Cache |
+|---|---|---|
+| alt, alt2, alt3 | disk each time | 1, 2, 3 slots |
+| alt4 | disk; evicts `default.m8` | 3 |
+| default | disk; evicts `alt.m8` | 3 |
+| alt3, alt2 | **cache**, 30.1 / 29.6 ms | 3 |
+| alt | disk; evicts `alt4.m8` | 3 |
+| default | **cache**, 29.5 ms | 3 |
+
+`LIB_SUM ok=8/8 cache=3 psram_free=6171480`: exactly active + three 294,916 B
+blob allocations, with no growth across evictions. The standard image and the
+legacy model partition were restored afterwards
+(`logs/M8-LIB-RESTORE-2026-11-25.log`).
+
 Still open:
 
 1. Remove the card mid-read; needs physical access to the slot, so it remains a
@@ -646,7 +735,7 @@ Still open:
 3. Exercise `model_compat()` with a real different-shape blob on device. This
    needs a second trained model; the host-side rules are covered by the header
    and tensor-table validators.
-4. Directory scan / model listing and NVS last-selected persistence (not in v1).
+4. An atomic download / rename path for models written over Wi-Fi.
 
 ## 10. Non-goals for v1
 
@@ -669,12 +758,15 @@ Build v1 in this order:
    int8 dump is bit-identical for 12 x 512 values.
 3. **Runtime switch** for same-shape models, with in-place refill, PSRAM
    rollback and flash fallback. **Done 2026-11-25** — 100/100 alternating
-   switches, plus a forced sanity failure that rolled back cleanly. Directory
-   scan/list and NVS persistence remain future work.
+   switches, plus a forced sanity failure that rolled back cleanly.
 4. **40 MHz + `read()`** in the loader. **Done 2026-11-25** — this is what the
    blob loader uses; the measured 284 KiB stage is 233 ms including SHA-256.
-5. **PSRAM model cache** only if switch latency needs to go below ~370 ms.
-   Not implemented; the retained active blob already gives the rollback path.
+5. **Model library**: directory scan/list, header-only probe, NVS last-selected
+   boot order. **Done 2026-11-25** — two-model listing, persisted selection
+   across reboots.
+6. **PSRAM model cache**: three LRU slots plus the active blob. **Done
+   2026-11-25** — repeat switch 29–30 ms vs 377–405 ms cold, verified with
+   three-slot eviction.
 
 Step 4 can be done independently of the blob and is the lowest-risk firmware
 change: same model, same partition, just a different read API and clock.

@@ -13,6 +13,7 @@
 
 #include "model_lib.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,7 +136,10 @@ static bool expected_shape(int id, uint32_t rows, uint32_t cols,
     }
 }
 
-static int parse_header(model_stage_t *st)
+// Validate the 4 KiB header and its derived layout. `st->file_bytes` and
+// `st->payload_bytes` must already be set; `st->blob` must point at the
+// header. When `payload` is non-NULL its SHA-256 is checked too.
+static int parse_header_impl(model_stage_t *st, bool verify_payload, bool log)
 {
     uint8_t *h = st->blob;
     if (st->file_bytes < M8_HEADER_BYTES) {
@@ -169,13 +173,15 @@ static int parse_header(model_stage_t *st)
         return MODEL_ERR_HEADER_CRC;
     }
     uint8_t digest[32];
-    if (sha256_payload(st->payload, st->payload_bytes, digest) != 0) {
-        ESP_LOGE(TAG, "SHA-256 failed");
-        return MODEL_ERR_IO;
-    }
-    if (memcmp(digest, h + OFF_PAYLOAD_SHA, sizeof(digest)) != 0) {
-        ESP_LOGE(TAG, "payload SHA-256 mismatch");
-        return MODEL_ERR_SHA;
+    if (verify_payload) {
+        if (sha256_payload(st->payload, st->payload_bytes, digest) != 0) {
+            ESP_LOGE(TAG, "SHA-256 failed");
+            return MODEL_ERR_IO;
+        }
+        if (memcmp(digest, h + OFF_PAYLOAD_SHA, sizeof(digest)) != 0) {
+            ESP_LOGE(TAG, "payload SHA-256 mismatch");
+            return MODEL_ERR_SHA;
+        }
     }
 
     st->dim = rd16(h + OFF_DIM);
@@ -211,6 +217,11 @@ static int parse_header(model_stage_t *st)
         (uint64_t)st->tok_off + st->tok_bytes > st->payload_bytes) {
         ESP_LOGE(TAG, "tokenizer range invalid");
         return MODEL_ERR_SHAPE;
+    }
+    st->tok_crc = 0;
+    if (st->payload) {
+        st->tok_crc = esp_rom_crc32_le(0, st->payload + st->tok_off,
+                                       st->tok_bytes);
     }
 
     st->sanity_prompt_len = h[OFF_SANITY_LEN];
@@ -328,19 +339,21 @@ static int parse_header(model_stage_t *st)
         return MODEL_ERR_SHAPE;
     }
 
-    ESP_LOGI(TAG, "blob ok: %u B, name=\"%s\" build=\"%s\"",
-             (unsigned)st->file_bytes, st->name, st->build_id);
-    ESP_LOGI(TAG, "  cfg dim=%d hidden=%d layers=%d heads=%d kv=%d vocab=%d "
-                  "seq=%d ctx=%d",
-             st->dim, st->hidden, st->layers, st->heads, st->kv_heads,
-             st->vocab, st->seq, st->ctx);
-    ESP_LOGI(TAG, "  payload q=%u scales=%u norms=%u tokenizer=%u @ %u",
-             (unsigned)st->q_bytes, (unsigned)st->scale_bytes,
-             (unsigned)st->norm_bytes, (unsigned)st->tok_bytes,
-             (unsigned)st->tok_off);
-    ESP_LOGI(TAG, "  sanity prompt=%d top%d crc=0x%08x",
-             st->sanity_prompt_len, st->sanity_topk,
-             (unsigned)st->sanity_crc);
+    if (log) {
+        ESP_LOGI(TAG, "blob ok: %u B, name=\"%s\" build=\"%s\"",
+                 (unsigned)st->file_bytes, st->name, st->build_id);
+        ESP_LOGI(TAG, "  cfg dim=%d hidden=%d layers=%d heads=%d kv=%d vocab=%d "
+                      "seq=%d ctx=%d",
+                 st->dim, st->hidden, st->layers, st->heads, st->kv_heads,
+                 st->vocab, st->seq, st->ctx);
+        ESP_LOGI(TAG, "  payload q=%u scales=%u norms=%u tokenizer=%u @ %u",
+                 (unsigned)st->q_bytes, (unsigned)st->scale_bytes,
+                 (unsigned)st->norm_bytes, (unsigned)st->tok_bytes,
+                 (unsigned)st->tok_off);
+        ESP_LOGI(TAG, "  sanity prompt=%d top%d crc=0x%08x",
+                 st->sanity_prompt_len, st->sanity_topk,
+                 (unsigned)st->sanity_crc);
+    }
     return MODEL_OK;
 }
 
@@ -359,6 +372,7 @@ const char *model_strerror(int rc)
     case MODEL_ERR_NOMEM:     return "nomem";
     case MODEL_ERR_SANITY:    return "sanity";
     case MODEL_ERR_ROLLBACK:  return "rollback";
+    case MODEL_ERR_NOTFOUND:  return "not-found";
     default:                  return "?";
     }
 }
@@ -375,6 +389,7 @@ void model_stage_free(model_stage_t *st)
 int model_stage_file(const char *path, model_stage_t *st)
 {
     memset(st, 0, sizeof(*st));
+    snprintf(st->path, sizeof(st->path), "%s", path);
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         ESP_LOGW(TAG, "open %s failed", path);
@@ -416,7 +431,7 @@ int model_stage_file(const char *path, model_stage_t *st)
     st->file_bytes = sz;
     st->payload = blob + M8_HEADER_BYTES;
     st->payload_bytes = sz - M8_HEADER_BYTES;
-    int rc = parse_header(st);
+    int rc = parse_header_impl(st, true, true);
     if (rc != MODEL_OK) {
         model_stage_free(st);
     }
@@ -426,6 +441,7 @@ int model_stage_file(const char *path, model_stage_t *st)
 int model_stage_partition(const char *label, model_stage_t *st)
 {
     memset(st, 0, sizeof(*st));
+    snprintf(st->path, sizeof(st->path), "partition:%s", label);
     const esp_partition_t *p = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, 0x40, label);
     if (!p || p->size < 4) {
@@ -452,7 +468,7 @@ int model_stage_partition(const char *label, model_stage_t *st)
     st->file_bytes = len;
     st->payload = blob + M8_HEADER_BYTES;
     st->payload_bytes = len - M8_HEADER_BYTES;
-    int rc = parse_header(st);
+    int rc = parse_header_impl(st, true, true);
     if (rc != MODEL_OK) {
         model_stage_free(st);
     }
@@ -482,6 +498,138 @@ int model_stage_save(const model_stage_t *st, const char *path)
         off += (size_t)n;
     }
     close(fd);
+    return MODEL_OK;
+}
+
+int model_probe_file(const char *path, model_info_t *info)
+{
+    if (!path || !info) {
+        return MODEL_ERR_IO;
+    }
+    memset(info, 0, sizeof(*info));
+    const char *base = strrchr(path, '/');
+    snprintf(info->file, sizeof(info->file), "%s", base ? base + 1 : path);
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return MODEL_ERR_IO;
+    }
+    struct stat sb;
+    if (fstat(fd, &sb) != 0 || sb.st_size < M8_HEADER_BYTES ||
+        sb.st_size > M8_MAX_BYTES) {
+        close(fd);
+        return MODEL_ERR_SIZE;
+    }
+
+    uint8_t hdr[M8_HEADER_BYTES];
+    size_t got = 0;
+    while (got < sizeof(hdr)) {
+        ssize_t n = read(fd, hdr + got, sizeof(hdr) - got);
+        if (n <= 0) {
+            close(fd);
+            return MODEL_ERR_IO;
+        }
+        got += (size_t)n;
+    }
+
+    model_stage_t st;
+    memset(&st, 0, sizeof(st));
+    st.blob = hdr;
+    st.file_bytes = (size_t)sb.st_size;
+    st.payload_bytes = st.file_bytes - M8_HEADER_BYTES;
+    int rc = parse_header_impl(&st, false, false);
+    if (rc != MODEL_OK) {
+        close(fd);
+        return rc;
+    }
+
+    // The tokenizer lives at 4096 + tok_off in the file. Hashing only those
+    // bytes lets a listing say whether two models share a vocabulary without
+    // reading the payload.
+    if (lseek(fd, (off_t)M8_HEADER_BYTES + (off_t)st.tok_off, SEEK_SET) < 0) {
+        close(fd);
+        return MODEL_ERR_IO;
+    }
+    uint8_t buf[256];
+    uint32_t crc = 0;
+    uint32_t left = st.tok_bytes;
+    while (left > 0) {
+        size_t want = left < sizeof(buf) ? left : sizeof(buf);
+        ssize_t n = read(fd, buf, want);
+        if (n <= 0) {
+            close(fd);
+            return MODEL_ERR_IO;
+        }
+        crc = esp_rom_crc32_le(crc, buf, (uint32_t)n);
+        left -= (uint32_t)n;
+    }
+    close(fd);
+
+    snprintf(info->name, sizeof(info->name), "%s", st.name);
+    snprintf(info->build_id, sizeof(info->build_id), "%s", st.build_id);
+    info->file_bytes = (uint32_t)st.file_bytes;
+    info->tok_crc = crc;
+    info->sanity_crc = st.sanity_crc;
+    info->dim = (uint16_t)st.dim;
+    info->hidden = (uint16_t)st.hidden;
+    info->layers = (uint16_t)st.layers;
+    info->heads = (uint16_t)st.heads;
+    info->kv_heads = (uint16_t)st.kv_heads;
+    info->vocab = (uint16_t)st.vocab;
+    info->seq = (uint16_t)st.seq;
+    info->ctx = (uint16_t)st.ctx;
+    return MODEL_OK;
+}
+
+static int info_cmp(const void *a, const void *b)
+{
+    return strcmp(((const model_info_t *)a)->file,
+                  ((const model_info_t *)b)->file);
+}
+
+int model_scan_dir(const char *dir, model_info_t *out, size_t cap,
+                   size_t *count)
+{
+    if (!dir || !count) {
+        return MODEL_ERR_IO;
+    }
+    *count = 0;
+    DIR *d = opendir(dir);
+    if (!d) {
+        ESP_LOGW(TAG, "scan: cannot open %s", dir);
+        return MODEL_ERR_IO;
+    }
+    size_t n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        size_t len = strlen(e->d_name);
+        if (e->d_name[0] == '.' || len < 4 ||
+            strcmp(e->d_name + len - 3, ".m8") != 0) {
+            continue;
+        }
+        char path[320];
+        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        model_info_t info;
+        int rc = model_probe_file(path, &info);
+        if (rc != MODEL_OK) {
+            ESP_LOGW(TAG, "scan: skip %s (%s)", e->d_name, model_strerror(rc));
+            continue;
+        }
+        if (out && n < cap) {
+            out[n] = info;
+        }
+        n++;
+    }
+    closedir(d);
+    if (out) {
+        size_t kept = n < cap ? n : cap;
+        if (kept > 1) {
+            qsort(out, kept, sizeof(*out), info_cmp);
+        }
+        *count = kept;
+    } else {
+        *count = n;
+    }
     return MODEL_OK;
 }
 
@@ -708,10 +856,127 @@ void model_ctx_free(model_ctx_t *ctx)
     if (!ctx) {
         return;
     }
+    model_cache_clear(ctx);
     model_stage_free(&ctx->active);
     ctx->m = NULL;
     ctx->tk = NULL;
     ctx->bound = false;
+}
+
+static int cache_slot_for(const model_ctx_t *ctx, const char *path)
+{
+    for (int i = 0; i < MODEL_CACHE_SLOTS; i++) {
+        if (ctx->cache[i].blob && strcmp(ctx->cache[i].path, path) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int model_cache_count(const model_ctx_t *ctx)
+{
+    int n = 0;
+    if (!ctx) {
+        return 0;
+    }
+    for (int i = 0; i < MODEL_CACHE_SLOTS; i++) {
+        if (ctx->cache[i].blob) {
+            n++;
+        }
+    }
+    return n;
+}
+
+bool model_cache_has(const model_ctx_t *ctx, const char *path)
+{
+    return ctx && path && cache_slot_for(ctx, path) >= 0;
+}
+
+int model_cache_find(model_ctx_t *ctx, const char *path, model_stage_t *out)
+{
+    if (!ctx || !path || !out) {
+        return MODEL_ERR_IO;
+    }
+    memset(out, 0, sizeof(*out));
+    int i = cache_slot_for(ctx, path);
+    if (i < 0) {
+        return MODEL_ERR_NOTFOUND;
+    }
+    *out = ctx->cache[i];
+    memset(&ctx->cache[i], 0, sizeof(ctx->cache[i]));
+    ctx->cache_tick[i] = 0;
+    return MODEL_OK;
+}
+
+static int cache_victim(const model_ctx_t *ctx)
+{
+    int victim = -1;
+    uint32_t oldest = 0;
+    for (int i = 0; i < MODEL_CACHE_SLOTS; i++) {
+        if (!ctx->cache[i].blob) {
+            return i;
+        }
+        if (victim < 0 || ctx->cache_tick[i] < oldest) {
+            victim = i;
+            oldest = ctx->cache_tick[i];
+        }
+    }
+    return victim;
+}
+
+int model_cache_put(model_ctx_t *ctx, model_stage_t *st)
+{
+    if (!ctx || !st || !st->blob) {
+        return MODEL_ERR_IO;
+    }
+    if (!st->path[0]) {
+        // Cannot be addressed by a later select, so do not take it.
+        return MODEL_ERR_IO;
+    }
+    int i = cache_slot_for(ctx, st->path);
+    if (i < 0) {
+        i = cache_victim(ctx);
+        if (i < 0) {
+            return MODEL_ERR_NOMEM;
+        }
+        if (ctx->cache[i].blob) {
+            ESP_LOGI(TAG, "cache evict %s (%u B)", ctx->cache[i].path,
+                     (unsigned)ctx->cache[i].file_bytes);
+            model_stage_free(&ctx->cache[i]);
+        }
+    } else {
+        model_stage_free(&ctx->cache[i]);
+    }
+    ctx->cache[i] = *st;
+    memset(st, 0, sizeof(*st));
+    ctx->cache_tick[i] = ++ctx->tick;
+    ESP_LOGI(TAG, "cache store %s (%u B), %d/%d slots", ctx->cache[i].path,
+             (unsigned)ctx->cache[i].file_bytes, model_cache_count(ctx),
+             MODEL_CACHE_SLOTS);
+    return MODEL_OK;
+}
+
+void model_cache_remove(model_ctx_t *ctx, const char *path)
+{
+    if (!ctx || !path) {
+        return;
+    }
+    int i = cache_slot_for(ctx, path);
+    if (i >= 0) {
+        model_stage_free(&ctx->cache[i]);
+        ctx->cache_tick[i] = 0;
+    }
+}
+
+void model_cache_clear(model_ctx_t *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+    for (int i = 0; i < MODEL_CACHE_SLOTS; i++) {
+        model_stage_free(&ctx->cache[i]);
+        ctx->cache_tick[i] = 0;
+    }
 }
 
 static bool stage_same_layout(const model_stage_t *a, const model_stage_t *b)
@@ -748,12 +1013,30 @@ int model_compat(const model_ctx_t *ctx, const model_stage_t *st)
     if (!stage_same_layout(&ctx->active, st)) {
         return MODEL_ERR_SHAPE;
     }
-    // v1 requires the same vocabulary. The packer embeds the tokenizer file
-    // verbatim, so byte identity is the cheap, strict form of that rule.
+    // Runtime switching requires the same vocabulary. The packer embeds the
+    // tokenizer file verbatim, so byte identity is the cheap, strict form.
     if (st->tok_bytes != ctx->active.tok_bytes ||
         memcmp(st->payload + st->tok_off,
                ctx->active.payload + ctx->active.tok_off,
                st->tok_bytes) != 0) {
+        return MODEL_ERR_TOKENIZER;
+    }
+    return MODEL_OK;
+}
+
+int model_info_compat(const model_ctx_t *ctx, const model_info_t *info)
+{
+    if (!ctx || !ctx->bound || !info) {
+        return MODEL_ERR_IO;
+    }
+    if (info->dim != ctx->active.dim || info->hidden != ctx->active.hidden ||
+        info->layers != ctx->active.layers || info->heads != ctx->active.heads ||
+        info->kv_heads != ctx->active.kv_heads ||
+        info->vocab != ctx->active.vocab || info->seq != ctx->active.seq ||
+        info->ctx != ctx->active.ctx) {
+        return MODEL_ERR_SHAPE;
+    }
+    if (info->tok_crc != ctx->active.tok_crc) {
         return MODEL_ERR_TOKENIZER;
     }
     return MODEL_OK;
@@ -810,11 +1093,36 @@ int model_apply(model_ctx_t *ctx, model_stage_t *st, model_apply_stats_t *stats)
         return rc;
     }
 
-    // The new blob becomes the rollback source for the next switch.
-    model_stage_free(&ctx->active);
+    // The new blob becomes the rollback source for the next switch, and the
+    // model it replaced goes into the PSRAM cache so switching back is cheap.
+    model_stage_t old = ctx->active;
     ctx->active = *st;
     memset(st, 0, sizeof(*st));
-    ESP_LOGI(TAG, "model switch ok: %s (%u B)", ctx->active.name,
-             (unsigned)ctx->active.file_bytes);
+    if (old.blob) {
+        if (strcmp(old.path, ctx->active.path) == 0) {
+            model_stage_free(&old);
+        } else if (model_cache_put(ctx, &old) != MODEL_OK) {
+            model_stage_free(&old);
+        }
+    }
+    ESP_LOGI(TAG, "model switch ok: %s (%u B), cache=%d/%d",
+             ctx->active.name, (unsigned)ctx->active.file_bytes,
+             model_cache_count(ctx), MODEL_CACHE_SLOTS);
     return MODEL_OK;
+}
+
+int model_apply_cached(model_ctx_t *ctx, const char *path,
+                       model_apply_stats_t *stats)
+{
+    model_apply_stats_t local;
+    if (!stats) {
+        stats = &local;
+    }
+    memset(stats, 0, sizeof(*stats));
+    model_stage_t st;
+    int rc = model_cache_find(ctx, path, &st);
+    if (rc != MODEL_OK) {
+        return rc;
+    }
+    return model_apply(ctx, &st, stats);
 }

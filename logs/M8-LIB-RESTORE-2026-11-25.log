@@ -1,0 +1,9 @@
+# Board restore after the model-library tests, 2026-11-25
+# Standard image 4c96f65b... and the legacy model partition were reflashed.
+
+I (923) llms3: SD mounted in 70628 us
+I (2084) llms3: model source: SD card
+I (2196) llms3: model: dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512
+I (2228) llms3: SD unmounted (ESP_OK); internal free=324739 largest=200704
+I (2351) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2351) llm: int8 weights 274656 B, kv cache 655360 B, model file 1056540 B

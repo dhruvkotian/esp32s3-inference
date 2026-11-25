@@ -1,0 +1,89 @@
+# Model library PSRAM cache: 3-slot LRU eviction, 2026-11-25
+# Test build: LIB_TEST=4. Five files with the same payload under different
+# names fill the cache; expected sources are disk x5, cache x2, disk, cache.
+
+rst:0x1 (POWERON),boot:0x2b (SPI_FAST_FLASH_BOOT)
+I (1047) llms3: SD mounted in 78804 us
+I (1100) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (1882) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+LIB_PROV file=/sdcard/models/alt.m8 bytes=290816 rc=0
+LIB_PROV file=/sdcard/models/alt2.m8 bytes=290816 rc=0
+LIB_PROV file=/sdcard/models/alt3.m8 bytes=290816 rc=0
+LIB_PROV file=/sdcard/models/alt4.m8 bytes=290816 rc=0
+I (5097) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (5114) llms3: boot: using NVS last model default.m8
+I (5294) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (5294) llms3: model source: .m8 blob
+CFG dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512 hot=16 psram_weights=0 m8=1
+LIB_BOOT path=/sdcard/models/default.m8 name=stories260k-q8 last=default.m8 cache=0 psram_free=7056228
+I (5402) llms3: SD mounted in 80618 us
+LIB_LIST rc=0 n=5
+LIB_MODEL file=alt.m8 bytes=290816 name="Alt scaled 1.03" sanity=0x329da241 tok=0xfd879e2c compat=0
+LIB_MODEL file=alt2.m8 bytes=290816 name="Alt scaled 1.03" sanity=0x329da241 tok=0xfd879e2c compat=0
+LIB_MODEL file=alt3.m8 bytes=290816 name="Alt scaled 1.03" sanity=0x329da241 tok=0xfd879e2c compat=0
+LIB_MODEL file=alt4.m8 bytes=290816 name="Alt scaled 1.03" sanity=0x329da241 tok=0xfd879e2c compat=0
+LIB_MODEL file=default.m8 bytes=290816 name="stories260k-q8" sanity=0xb2f5d2bd tok=0xfd879e2c compat=0
+I (5596) llms3: SD mounted in 81925 us
+I (5845) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (5909) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (5909) model: cache store /sdcard/models/default.m8 (290816 B), 1/3 slots
+I (5911) model: model switch ok: Alt scaled 1.03 (290816 B), cache=1/3
+I (5932) modelpref: last model = alt.m8
+LIB_SELECT i=0 file=/sdcard/models/alt.m8 src=disk rc=0 total=405000 cache=1 active=Alt scaled 1.03
+I (6019) llms3: SD mounted in 82899 us
+I (6258) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (6321) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (6321) model: cache store /sdcard/models/alt.m8 (290816 B), 2/3 slots
+I (6323) model: model switch ok: Alt scaled 1.03 (290816 B), cache=2/3
+I (6344) modelpref: last model = alt2.m8
+LIB_SELECT i=1 file=/sdcard/models/alt2.m8 src=disk rc=0 total=396102 cache=2 active=Alt scaled 1.03
+I (6431) llms3: SD mounted in 82766 us
+I (6652) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (6716) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (6716) model: cache store /sdcard/models/alt2.m8 (290816 B), 3/3 slots
+I (6718) model: model switch ok: Alt scaled 1.03 (290816 B), cache=3/3
+I (6739) modelpref: last model = alt3.m8
+LIB_SELECT i=2 file=/sdcard/models/alt3.m8 src=disk rc=0 total=379103 cache=3 active=Alt scaled 1.03
+I (6826) llms3: SD mounted in 82729 us
+I (7046) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (7110) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (7110) model: cache evict /sdcard/models/default.m8 (290816 B)
+I (7111) model: cache store /sdcard/models/alt3.m8 (290816 B), 3/3 slots
+I (7118) model: model switch ok: Alt scaled 1.03 (290816 B), cache=3/3
+I (7139) modelpref: last model = alt4.m8
+LIB_SELECT i=3 file=/sdcard/models/alt4.m8 src=disk rc=0 total=383681 cache=3 active=Alt scaled 1.03
+I (7226) llms3: SD mounted in 82940 us
+I (7466) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (7529) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (7529) model: cache evict /sdcard/models/alt.m8 (290816 B)
+I (7530) model: cache store /sdcard/models/alt4.m8 (290816 B), 3/3 slots
+I (7536) model: model switch ok: stories260k-q8 (290816 B), cache=3/3
+I (7558) modelpref: last model = default.m8
+LIB_SELECT i=4 file=/sdcard/models/default.m8 src=disk rc=0 total=402411 cache=3 active=stories260k-q8
+I (7581) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (7582) model: cache store /sdcard/models/default.m8 (290816 B), 3/3 slots
+I (7583) model: model switch ok: Alt scaled 1.03 (290816 B), cache=3/3
+I (7604) modelpref: last model = alt3.m8
+LIB_SELECT i=5 file=/sdcard/models/alt3.m8 src=cache rc=0 total=30079 cache=3 active=Alt scaled 1.03
+I (7628) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (7628) model: cache store /sdcard/models/alt3.m8 (290816 B), 3/3 slots
+I (7629) model: model switch ok: Alt scaled 1.03 (290816 B), cache=3/3
+I (7650) modelpref: last model = alt2.m8
+LIB_SELECT i=6 file=/sdcard/models/alt2.m8 src=cache rc=0 total=29553 cache=3 active=Alt scaled 1.03
+I (7738) llms3: SD mounted in 82741 us
+I (7982) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (8045) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (8046) model: cache evict /sdcard/models/alt4.m8 (290816 B)
+I (8046) model: cache store /sdcard/models/alt2.m8 (290816 B), 3/3 slots
+I (8052) model: model switch ok: Alt scaled 1.03 (290816 B), cache=3/3
+I (8074) modelpref: last model = alt.m8
+LIB_SELECT i=7 file=/sdcard/models/alt.m8 src=disk rc=0 total=406607 cache=3 active=Alt scaled 1.03
+I (8097) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (8097) model: cache store /sdcard/models/alt.m8 (290816 B), 3/3 slots
+I (8098) model: model switch ok: stories260k-q8 (290816 B), cache=3/3
+I (8119) modelpref: last model = default.m8
+LIB_FINAL file=/sdcard/models/default.m8 src=cache rc=0 total=29481 cache=3 active=stories260k-q8
+LIB_SUM ok=8/8 cache=3 psram_free=6171480
+LIB_ACTIVE name=stories260k-q8 build=packer1 b0a507e7ad0f path=/sdcard/models/default.m8 cache=3
+I (8218) llms3: SD mounted in 82533 us
+LIB_DONE

@@ -1,0 +1,47 @@
+# Model library A+B: scan/list, cold select, PSRAM cache hit, NVS persistence
+# Board: ESP32-S3-CAM, 8 MB octal PSRAM, 16 MB flash, SD 40 MHz 1-bit
+# A = /sdcard/models/default.m8 (stories260k-q8, crc 0xb2f5d2bd)
+# B = /sdcard/models/alt.m8 (synthetic scale=1.03, crc 0x329da241)
+# Test build: LIB_TEST=1 (clears NVS, provisions alt from the partition)
+#
+# Sequence: boot default.m8, then select alt -> default -> alt.
+# Expected sources: disk, cache, cache.
+
+I (1104) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (1104) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (1108) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+SWITCH_STAGE rc=0 bytes=290816 name=Alt scaled 1.03
+I (2145) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (2145) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2149) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2175) modelpref: last model = default.m8
+I (2344) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2344) llms3: model source: .m8 blob
+CFG dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512 ctx=512 hot=16 psram_weights=0 m8=1
+M8 bytes=290816 prequantized
+LIB_BOOT path=/sdcard/models/default.m8 name=stories260k-q8 last=default.m8 cache=0 psram_free=7056228
+LIB_LIST rc=0 n=2
+LIB_MODEL file=alt.m8 bytes=290816 name="Alt scaled 1.03" sanity=0x329da241 tok=0xfd879e2c compat=0
+LIB_MODEL file=default.m8 bytes=290816 name="stories260k-q8" sanity=0xb2f5d2bd tok=0xfd879e2c compat=0
+I (2814) model: blob ok: 290816 B, name="Alt scaled 1.03" build="synthetic scale=1.03"
+I (2814) model:   cfg dim=64 hidden=172 layers=5 heads=8 kv=4 vocab=512 seq=512 ctx=512
+I (2819) model:   payload q=260608 scales=14048 norms=2816 tokenizer=6227 @ 277472
+I (2878) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (2878) model: cache store /sdcard/models/default.m8 (290816 B), 1/3 slots
+I (2880) model: model switch ok: Alt scaled 1.03 (290816 B), cache=1/3
+I (2901) modelpref: last model = alt.m8
+LIB_SELECT i=0 file=/sdcard/models/alt.m8 src=disk rc=0 mount=88303 stage=233931 copy=4709 sanity=17091 total=377637 cache=1 active=Alt scaled 1.03
+I (2928) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2928) model: cache store /sdcard/models/alt.m8 (290816 B), 1/3 slots
+I (2929) model: model switch ok: stories260k-q8 (290816 B), cache=1/3
+I (2951) modelpref: last model = default.m8
+LIB_SELECT i=1 file=/sdcard/models/default.m8 src=cache rc=0 mount=0 stage=0 copy=4578 sanity=16995 total=29439 cache=1 active=stories260k-q8
+I (2978) model: sanity ok: top32 crc=0x329da241 greedy=432,383,286,...
+I (2978) model: cache store /sdcard/models/default.m8 (290816 B), 1/3 slots
+I (2980) model: model switch ok: Alt scaled 1.03 (290816 B), cache=1/3
+I (3001) modelpref: last model = alt.m8
+LIB_SELECT i=2 file=/sdcard/models/alt.m8 src=cache rc=0 mount=0 stage=0 copy=4684 sanity=16997 total=29980 cache=1 active=Alt scaled 1.03
+LIB_GEN match=1
+LIB_SUM ok=3/3 cache=1 psram_free=6761312
+LIB_ACTIVE name=Alt scaled 1.03 build=synthetic scale=1.03 path=/sdcard/models/alt.m8 cache=1
+LIB_DONE

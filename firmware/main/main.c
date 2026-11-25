@@ -26,6 +26,7 @@
 #include "esp_partition.h"
 #include "esp_psram.h"
 #include "esp_rom_sys.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "esp_vfs_fat.h"
@@ -42,6 +43,7 @@
 #include "llm.h"
 #include "tokenizer.h"
 #include "model_lib.h"
+#include "model_prefs.h"
 #include "bench_cfg.h"
 
 static const char *TAG = "llms3";
@@ -55,8 +57,19 @@ static model_ctx_t g_model;
 #define SD_MMC_D0  40
 #define MODEL_PATH "/sdcard/stories260K.bin"
 #define TOK_PATH   "/sdcard/tok512.bin"
+#define MODEL_DIR  "/sdcard/models"
 #define M8_PATH    "/sdcard/models/default.m8"
 #define SWITCH_ALT_PATH "/sdcard/models/alt.m8"
+
+// Model-library test harness (temporary; off in the published build).
+//   0  off
+//   1  provision alt.m8 from the partition, then select alt -> default -> alt
+//   2  report the boot-selected model and exit (run after 1 to see NVS)
+//   3  select default.m8, persist it and reboot; on the next boot confirm it
+#ifndef LIB_TEST
+#define LIB_TEST 0
+#endif
+#define MODEL_LIST_MAX 12
 
 // Runtime-switch harness. Off in normal builds; the test build enables it in
 // bench_cfg.h. M8_TEST_PARTITION_ONLY is test scaffolding too: it boots the
@@ -482,8 +495,11 @@ static void m8_stage_from_partition(void)
 }
 #endif
 
-// Boot the model. Prefers /sdcard/models/default.m8 and falls back to the
-// legacy fp32 checkpoint plus tok512.bin.
+// Boot the model. Order is:
+//   1. the model named by the NVS last-selection, if it still loads
+//   2. /sdcard/models/default.m8
+//   3. the .m8 blob in the flash model partition
+//   4. the legacy fp32 checkpoint plus tok512.bin
 //
 // Ordering matters: every byte is staged into PSRAM while the card is mounted,
 // then the card is unmounted before the int8 arena is allocated. The SDMMC and
@@ -508,12 +524,39 @@ static bool boot_model(sdmmc_card_t *card, bool sd_ok, int ctx,
     model_stage_t st;
     memset(&st, 0, sizeof(st));
     int m8rc = MODEL_ERR_IO;
+    char used_name[64] = "";
+    char last[64] = "";
 #if !M8_TEST_PARTITION_ONLY
     if (sd_ok) {
+        mkdir(MODEL_DIR, 0777);
         // Seed the card from the flash partition on the first boot after a
         // blob was written there. No-op when the file already exists.
         m8_stage_from_partition();
-        m8rc = model_stage_file(M8_PATH, &st);
+
+        if (model_pref_get_last(last, sizeof(last)) == 0) {
+            char path[96];
+            snprintf(path, sizeof(path), "%s/%s", MODEL_DIR, last);
+            m8rc = model_stage_file(path, &st);
+            if (m8rc == MODEL_OK) {
+                snprintf(used_name, sizeof(used_name), "%s", last);
+                ESP_LOGI(TAG, "boot: using NVS last model %s", last);
+            } else {
+                ESP_LOGW(TAG, "boot: last model %s failed (%s); trying default",
+                         last, model_strerror(m8rc));
+            }
+        }
+        if (m8rc != MODEL_OK) {
+            m8rc = model_stage_file(M8_PATH, &st);
+            if (m8rc == MODEL_OK) {
+                snprintf(used_name, sizeof(used_name), "%s", "default.m8");
+            }
+        }
+        // Persist what actually booted. A partition fallback leaves
+        // used_name empty and never overwrites the user's selection.
+        if (m8rc == MODEL_OK && used_name[0] &&
+            strcmp(used_name, last) != 0) {
+            model_pref_set_last(used_name);
+        }
     }
 #endif
     // The partition is a real fallback, not just a transport: with no card, or
@@ -745,16 +788,7 @@ static int match_expected(const gen_result_t *r){
     return -1;
 }
 
-#if SWITCH_TEST
-typedef struct {
-    uint32_t mount_us;
-    uint32_t stage_us;
-    uint32_t copy_us;
-    uint32_t sanity_us;
-    uint32_t total_us;
-    bool rolled_back;
-} switch_stats_t;
-
+#if SWITCH_TEST || LIB_TEST
 // Test-only provisioning: copy the blob in the flash model partition to
 // /sdcard/models/alt.m8. Called with the card mounted, before boot_model().
 // Overwrites, so a new test blob always replaces the previous one.
@@ -767,13 +801,24 @@ static void switch_stage_partition_to_alt(void)
         fflush(stdout);
         return;
     }
-    mkdir("/sdcard/models", 0777);
+    mkdir(MODEL_DIR, 0777);
     rc = model_stage_save(&st, SWITCH_ALT_PATH);
     printf("SWITCH_STAGE rc=%d bytes=%u name=%s\n", rc,
            (unsigned)st.file_bytes, st.name);
     model_stage_free(&st);
     fflush(stdout);
 }
+#endif
+
+#if SWITCH_TEST
+typedef struct {
+    uint32_t mount_us;
+    uint32_t stage_us;
+    uint32_t copy_us;
+    uint32_t sanity_us;
+    uint32_t total_us;
+    bool rolled_back;
+} switch_stats_t;
 
 // One full session-change: mount, stage from the card, unmount, apply.
 static int switch_model_file(model_ctx_t *ctx, const char *path,
@@ -851,6 +896,252 @@ static void switch_test(model_ctx_t *ctx)
         printf("SWITCH_ROLLBACK_OK=%d\n", match ? 1 : 0);
     }
     printf("SWITCH_DONE\n");
+    fflush(stdout);
+}
+#endif
+
+#if LIB_TEST
+typedef struct {
+    bool cache_hit;
+    uint32_t mount_us;
+    uint32_t stage_us;
+    uint32_t copy_us;
+    uint32_t sanity_us;
+    uint32_t total_us;
+} lib_stats_t;
+
+// Application-level selection: PSRAM cache first, then mount + stage + apply.
+// The library never mounts the card, so this is the only place that knows
+// about /sdcard.
+static int lib_select(model_ctx_t *ctx, const char *path, lib_stats_t *s)
+{
+    memset(s, 0, sizeof(*s));
+    int64_t t0 = esp_timer_get_time();
+
+    model_apply_stats_t a;
+    int rc = model_apply_cached(ctx, path, &a);
+    if (rc != MODEL_ERR_NOTFOUND) {
+        s->cache_hit = true;
+        s->copy_us = a.copy_us;
+        s->sanity_us = a.sanity_us;
+        s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+        if (rc == MODEL_OK) {
+            model_pref_set_last(path);
+        }
+        return rc;
+    }
+
+    sdmmc_card_t *card = NULL;
+    int64_t tm = esp_timer_get_time();
+    if (!sd_mount(&card)) {
+        s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+        return MODEL_ERR_IO;
+    }
+    s->mount_us = (uint32_t)(esp_timer_get_time() - tm);
+
+    int64_t t1 = esp_timer_get_time();
+    model_stage_t st;
+    rc = model_stage_file(path, &st);
+    s->stage_us = (uint32_t)(esp_timer_get_time() - t1);
+    esp_vfs_fat_sdcard_unmount("/sdcard", card);
+    if (rc != MODEL_OK) {
+        s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+        return rc;
+    }
+
+    rc = model_apply(ctx, &st, &a);
+    s->copy_us = a.copy_us;
+    s->sanity_us = a.sanity_us;
+    s->total_us = (uint32_t)(esp_timer_get_time() - t0);
+    if (rc == MODEL_OK) {
+        model_pref_set_last(path);
+    }
+    return rc;
+}
+
+static void lib_list(model_ctx_t *ctx)
+{
+    sdmmc_card_t *card = NULL;
+    if (!sd_mount(&card)) {
+        printf("LIB_LIST rc=io\n");
+        fflush(stdout);
+        return;
+    }
+    model_info_t infos[MODEL_LIST_MAX];
+    size_t n = 0;
+    int rc = model_scan_dir(MODEL_DIR, infos, MODEL_LIST_MAX, &n);
+    printf("LIB_LIST rc=%d n=%u\n", rc, (unsigned)n);
+    for (size_t i = 0; i < n; i++) {
+        int compat = model_info_compat(ctx, &infos[i]);
+        printf("LIB_MODEL file=%s bytes=%u name=\"%s\" sanity=0x%08x "
+               "tok=0x%08x compat=%d\n",
+               infos[i].file, (unsigned)infos[i].file_bytes, infos[i].name,
+               (unsigned)infos[i].sanity_crc, (unsigned)infos[i].tok_crc,
+               compat);
+    }
+    esp_vfs_fat_sdcard_unmount("/sdcard", card);
+    fflush(stdout);
+}
+
+#if LIB_TEST == 4
+// Extra copies of the same validated B blob, used only to fill all three cache
+// slots and force LRU eviction. Same payload, distinct cache keys.
+static void lib_provision_extra(void)
+{
+    model_stage_t st;
+    int rc = model_stage_partition("model", &st);
+    if (rc != MODEL_OK) {
+        printf("LIB_PROV rc=%d (%s)\n", rc, model_strerror(rc));
+        fflush(stdout);
+        return;
+    }
+    static const char *files[4] = {
+        SWITCH_ALT_PATH, "/sdcard/models/alt2.m8",
+        "/sdcard/models/alt3.m8", "/sdcard/models/alt4.m8",
+    };
+    for (int i = 0; i < 4; i++) {
+        int r = model_stage_save(&st, files[i]);
+        printf("LIB_PROV file=%s bytes=%u rc=%d\n", files[i],
+               (unsigned)st.file_bytes, r);
+    }
+    model_stage_free(&st);
+    fflush(stdout);
+}
+#endif
+
+static void lib_test(model_ctx_t *ctx, int mode)
+{
+    char last[64] = "";
+    model_pref_get_last(last, sizeof(last));
+    printf("LIB_BOOT path=%s name=%s last=%s cache=%d psram_free=%u\n",
+           ctx->active.path, ctx->active.name, last, model_cache_count(ctx),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    fflush(stdout);
+
+    if (mode == 2) {
+        gen_result_t g;
+        run_gen(ctx->m, ctx->tk, "Once upon a time", GEN_TOKENS, true, &g);
+        printf("LIB_GEN match=%d\n", match_expected(&g) < 0 ? 1 : 0);
+        printf("LIB_ACTIVE name=%s build=%s path=%s cache=%d\n",
+               ctx->active.name, ctx->active.build_id, ctx->active.path,
+               model_cache_count(ctx));
+        printf("LIB_DONE\n");
+        fflush(stdout);
+        return;
+    }
+
+    if (mode == 3) {
+        // Select default.m8, persist it, reboot. The next boot re-runs this
+        // mode and hits the confirm branch below.
+        if (strcmp(ctx->active.path, M8_PATH) == 0 &&
+            strcmp(last, "default.m8") == 0) {
+            printf("LIB_BOOT_CONFIRM default.m8\n");
+            printf("LIB_ACTIVE name=%s build=%s path=%s cache=%d\n",
+                   ctx->active.name, ctx->active.build_id, ctx->active.path,
+                   model_cache_count(ctx));
+            printf("LIB_DONE\n");
+            fflush(stdout);
+            return;
+        }
+        lib_stats_t s;
+        int rc = lib_select(ctx, M8_PATH, &s);
+        printf("LIB_SELECT i=0 file=%s src=%s rc=%d mount=%u stage=%u "
+               "copy=%u sanity=%u total=%u cache=%d active=%s\n",
+               M8_PATH, s.cache_hit ? "cache" : "disk", rc,
+               (unsigned)s.mount_us, (unsigned)s.stage_us,
+               (unsigned)s.copy_us, (unsigned)s.sanity_us,
+               (unsigned)s.total_us, model_cache_count(ctx),
+               ctx->active.name);
+        if (rc == MODEL_OK) {
+            printf("LIB_RESTART\n");
+            fflush(stdout);
+            esp_restart();
+        }
+        printf("LIB_DONE\n");
+        fflush(stdout);
+        return;
+    }
+
+    if (mode == 4) {
+        lib_list(ctx);
+        static const char *seq[8] = {
+            SWITCH_ALT_PATH, "/sdcard/models/alt2.m8",
+            "/sdcard/models/alt3.m8", "/sdcard/models/alt4.m8",
+            M8_PATH, "/sdcard/models/alt3.m8",
+            "/sdcard/models/alt2.m8", SWITCH_ALT_PATH,
+        };
+        int ok = 0;
+        for (int i = 0; i < 8; i++) {
+            lib_stats_t s;
+            int rc = lib_select(ctx, seq[i], &s);
+            printf("LIB_SELECT i=%d file=%s src=%s rc=%d total=%u cache=%d "
+                   "active=%s\n",
+                   i, seq[i], s.cache_hit ? "cache" : "disk", rc,
+                   (unsigned)s.total_us, model_cache_count(ctx),
+                   ctx->active.name);
+            fflush(stdout);
+            if (rc != MODEL_OK) {
+                break;
+            }
+            ok++;
+        }
+        // Leave the board on default.m8.
+        lib_stats_t s;
+        int rc = lib_select(ctx, M8_PATH, &s);
+        printf("LIB_FINAL file=%s src=%s rc=%d total=%u cache=%d active=%s\n",
+               M8_PATH, s.cache_hit ? "cache" : "disk", rc,
+               (unsigned)s.total_us, model_cache_count(ctx), ctx->active.name);
+        printf("LIB_SUM ok=%d/8 cache=%d psram_free=%u\n", ok,
+               model_cache_count(ctx),
+               (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        printf("LIB_ACTIVE name=%s build=%s path=%s cache=%d\n",
+               ctx->active.name, ctx->active.build_id, ctx->active.path,
+               model_cache_count(ctx));
+        sdmmc_card_t *card = NULL;
+        if (sd_mount(&card)) {
+            for (int i = 1; i < 4; i++) {
+                char path[64];
+                snprintf(path, sizeof(path), "%s/alt%d.m8", MODEL_DIR, i + 1);
+                unlink(path);
+            }
+            unlink(SWITCH_ALT_PATH);
+            esp_vfs_fat_sdcard_unmount("/sdcard", card);
+        }
+        printf("LIB_DONE\n");
+        fflush(stdout);
+        return;
+    }
+
+    lib_list(ctx);
+
+    static const char *seq[3] = { SWITCH_ALT_PATH, M8_PATH, SWITCH_ALT_PATH };
+    int ok = 0;
+    for (int i = 0; i < 3; i++) {
+        lib_stats_t s;
+        int rc = lib_select(ctx, seq[i], &s);
+        printf("LIB_SELECT i=%d file=%s src=%s rc=%d mount=%u stage=%u "
+               "copy=%u sanity=%u total=%u cache=%d active=%s\n",
+               i, seq[i], s.cache_hit ? "cache" : "disk", rc,
+               (unsigned)s.mount_us, (unsigned)s.stage_us,
+               (unsigned)s.copy_us, (unsigned)s.sanity_us,
+               (unsigned)s.total_us, model_cache_count(ctx), ctx->active.name);
+        fflush(stdout);
+        if (rc != MODEL_OK) {
+            break;
+        }
+        ok++;
+    }
+
+    gen_result_t g;
+    run_gen(ctx->m, ctx->tk, "Once upon a time", GEN_TOKENS, true, &g);
+    printf("LIB_GEN match=%d\n", match_expected(&g) < 0 ? 1 : 0);
+    printf("LIB_SUM ok=%d/%d cache=%d psram_free=%u\n", ok, 3,
+           model_cache_count(ctx),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    printf("LIB_ACTIVE name=%s build=%s path=%s cache=%d\n",
+           ctx->active.name, ctx->active.build_id, ctx->active.path,
+           model_cache_count(ctx));
+    printf("LIB_DONE\n");
     fflush(stdout);
 }
 #endif
@@ -1242,11 +1533,22 @@ static void bench_main(void)
     sdmmc_card_t *card = NULL;
     bool sd_ok = sd_mount(&card);
 
-#if SWITCH_TEST
+#if SWITCH_TEST || LIB_TEST
     // Provision the second model from the partition while the card is mounted.
     if (sd_ok) {
         switch_stage_partition_to_alt();
     }
+#endif
+#if LIB_TEST == 4
+    if (sd_ok) {
+        lib_provision_extra();
+    }
+#endif
+#if LIB_TEST == 1
+    // Mode 1 starts from default.m8 regardless of what a previous run stored.
+    model_pref_clear();
+#endif
+#if SWITCH_TEST || LIB_TEST
     model_ctx_t *sw_ctx = &g_model;
 #else
     model_ctx_t *sw_ctx = NULL;
@@ -1267,6 +1569,19 @@ static void bench_main(void)
     if (m8) {
         printf("M8 bytes=%u prequantized\n", (unsigned)m8_bytes);
     }
+
+#if LIB_TEST
+    if (!m8 || !g_model.bound) {
+        printf("LIB_TEST requires an .m8 boot with a bound context\n");
+        printf("LIB_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    lib_test(&g_model, LIB_TEST);
+    printf("BENCH_DONE\n");
+    fflush(stdout);
+    return;
+#endif
 
 #if SWITCH_TEST
     if (!m8 || !g_model.bound) {
