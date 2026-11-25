@@ -18,3 +18,4 @@ __pycache__/
 
 # Local captures that are not part of the release
 *.tmp
+
