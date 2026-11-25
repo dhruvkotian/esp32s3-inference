@@ -5,6 +5,11 @@ Board: ESP32-S3-CAM on /dev/ttyACM0, 240 MHz, ESP-IDF v5.4.4
 Model: dim 64, hidden 172, 5 layers, 8 heads, 4 KV heads, vocab 512, seq 512
 Firmware: this tree, switches in `main/bench_cfg.h`
 
+All `tok/s` values in this file are the 512-sample rate. The paper's primary
+decode-forward rate is 507/512 of each value, because the 512-sample harness
+performs 507 decode forwards. Where this file reports the final build at
+168.25 sampled tokens/s, the decode-forward rate is 166.6 forwards/s.
+
 ## What was changed
 
 `KV_INT8 1` stores K and V in PSRAM as int8, one fp32 scale per head per

@@ -1,13 +1,15 @@
 # esp32s3-int8-transformer
 
-Artifact for the paper **"Bytes, Not FLOPs: INT8 KV-Cache and Attention
-Optimisation for Long-Context Transformer Inference on the ESP32-S3"**.
+Artifact for the paper **"Bytes, Not FLOPs: INT8 KV Caching and 128-bit PIE
+Attention on ESP32-S3"**.
 
 This repository is the experiment tree behind the paper. It runs a
 260K-parameter decoder-only transformer at batch size one on an ESP32-S3, with
 the key/value cache stored as int8 in external PSRAM and attention mapped onto
 the 128-bit integer SIMD unit. At 512-token context the final build sustains
-168.25 tokens/s, 2.898x the same-tree fp32 single-core baseline.
+166.6 decode forwards/s, equivalent to 168.25 sampled tokens/s, 2.898x the
+same-tree fp32 single-core baseline. The 512-sample harness performs 507 decode
+forwards, because the last five samples reuse the final logits.
 
 Every number in the paper comes from a raw UART capture in `logs/`. The mapping
 from paper table rows to capture files is in [`logs/BUILD-MAP.md`](logs/BUILD-MAP.md).
@@ -18,8 +20,9 @@ fails if a required measurement is missing from a log.
 
 | Item | Value |
 |---|---|
-| Board | ESP32-S3-CAM, 16 MB flash, 8 MB octal PSRAM |
-| MCU | ESP32-S3, dual-core Xtensa LX7, 240 MHz, rev 0.2 |
+| Board | ESP32-S3-CAM generic carrier; vendor and revision not recorded |
+| MCU | ESP32-S3, dual-core Xtensa LX7, 240 MHz, rev 0.2, efuse v1.3 |
+| Memory | 16 MB Boya flash, 8 MB AP Memory octal PSRAM (gen 3, 64 Mbit), 80 MHz |
 | Internal SRAM | 512 KB |
 | Data cache | 64 KB, 8-way, 32 B lines (32 KB variants in `config/`) |
 | Host link | CH343 USB-UART bridge on `/dev/ttyACM0`, 115200 baud |
@@ -38,7 +41,7 @@ data/          expected.json, the reference logits for the accuracy harness
 logs/          raw UART captures, per-build summaries, figures, BUILD-MAP.md
 tools/         capture, analysis, figure generation, cache configuration
 micro/         separate app: ESP-DSP against the same-tree dot kernels
-docs/          hardware notes and the reproduction procedure
+docs/          hardware notes, reproduction, and project records
 ```
 
 ## Quick start
@@ -62,8 +65,8 @@ sdkconfig that `set-target` generated, and `fullclean` removes any previous
 build tree.
 
 The 32 KB variant is the baseline used in the cache sweep, not the build behind
-the 168.25 tokens/s headline. To build it, omit the `cp` line and continue from
-the generated `sdkconfig`:
+the 166.6 decode forwards/s headline. To build it, omit the `cp` line and
+continue from the generated `sdkconfig`:
 
 ```bash
 . $IDF_PATH/export.sh
@@ -107,9 +110,9 @@ On the long dot, ESP-DSP is 2.16x faster per block than the original two-load
 kernel (4.13 against 8.91 cycles). v1.2.0 adopts the same fused load in
 `llm_dot_s8`, which brings it to 4.10 cycles per block and closes the gap: the
 final kernel is equivalent to ESP-DSP on this workload, not slower than it.
-An interleaved A/B measured 166.74 to 168.25 tokens/s (+0.9%) with
-byte-identical logits. The rest of the scan did not move, because the V phase
-is memory-bound in situ.
+An interleaved A/B measured 166.74 to 168.25 sampled tokens/s (+0.9%), or
+165.1 to 166.6 decode forwards/s, with byte-identical logits. The rest of the
+scan did not move, because the V phase is memory-bound in situ.
 
 ## Regenerating the figures
 

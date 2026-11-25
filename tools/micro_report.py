@@ -198,9 +198,12 @@ def main() -> None:
     def ms(b):
         return b["gen"] / 512 / 1000.0
 
+    base_fwd = base["tok"] * 507.0 / 512.0
+    new_fwd = new["tok"] * 507.0 / 512.0
     ab_rows = "\n".join([
-        f"| Throughput (tokens/s) | {base['tok']:.2f} | {new['tok']:.2f} | {(new['tok'] / base['tok'] - 1) * 100:+.2f}% |",
-        f"| Token (ms) | {ms(base):.3f} | {ms(new):.3f} | {(ms(new) / ms(base) - 1) * 100:+.2f}% |",
+        f"| Sampled throughput (tokens/s) | {base['tok']:.2f} | {new['tok']:.2f} | {(new['tok'] / base['tok'] - 1) * 100:+.2f}% |",
+        f"| Decode-forward rate (forwards/s) | {base_fwd:.2f} | {new_fwd:.2f} | {(new_fwd / base_fwd - 1) * 100:+.2f}% |",
+        f"| Sampled-token time (ms) | {ms(base):.3f} | {ms(new):.3f} | {(ms(new) / ms(base) - 1) * 100:+.2f}% |",
         f"| Attention (ms) | {base['attn'] / 1000:.3f} | {new['attn'] / 1000:.3f} | {(new['attn'] / base['attn'] - 1) * 100:+.2f}% |",
         f"| K dot ($\\mu$s) | {base['phases']['kdot']:.1f} | {new['phases']['kdot']:.1f} | {(new['phases']['kdot'] / base['phases']['kdot'] - 1) * 100:+.2f}% |",
         f"| Softmax ($\\mu$s) | {base['phases']['softmax']:.1f} | {new['phases']['softmax']:.1f} | {(new['phases']['softmax'] / base['phases']['softmax'] - 1) * 100:+.2f}% |",
@@ -266,8 +269,9 @@ cache, dual core, three 512-token runs per capture. Baseline is v1.1.0
 
 All {len(ref)} logit blocks are byte-identical between the two builds, so the
 kernel change is bit-exact. The spread over the {len(new['runs'])} v1.2.0 runs
-is {min(new['runs']):.2f} to {max(new['runs']):.2f} tokens/s
-({(max(new['runs']) - min(new['runs'])) / new['tok'] * 100:.3f}%).
+is {min(new['runs']):.2f} to {max(new['runs']):.2f} sampled tokens/s
+({min(new['runs']) * 507.0 / 512.0:.2f} to {max(new['runs']) * 507.0 / 512.0:.2f}
+decode forwards/s), {(max(new['runs']) - min(new['runs'])) / new['tok'] * 100:.3f}%.
 
 ## Conclusion
 
@@ -281,7 +285,8 @@ one phase with enough instruction headroom left to matter.
 """
     OUT.write_text(doc)
     print(f"wrote {OUT} ({len(doc)} bytes)")
-    print(f"end to end: {base['tok']:.2f} -> {new['tok']:.2f} tokens/s")
+    print(f"end to end: {base['tok']:.2f} -> {new['tok']:.2f} sampled tokens/s "
+          f"({base_fwd:.2f} -> {new_fwd:.2f} decode forwards/s)")
 
 
 if __name__ == "__main__":

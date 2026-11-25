@@ -101,6 +101,20 @@ python3 tools/capture_until.py /dev/ttyACM0 240 logs/bench_mine.log BENCH_DONE
 The run ends at the `BENCH_DONE` marker. Every log in `logs/` was captured this
 way.
 
+## Throughput definition
+
+A full-context run samples 512 tokens but performs 507 decode forwards: the
+prompt is five tokens, so the context is full after 507 forwards, and the last
+five sampled tokens reuse the final logits. For each run, the sampled-token
+rate is `512 / (gen_us / 1e6)` and the decode-forward rate is
+`507 / (gen_us / 1e6)`. The two differ by the constant factor 507/512.
+
+The paper reports **166.6 decode forwards/s** as the primary throughput and
+retains **168.25 sampled tokens/s** as the original benchmark metric. Every
+configuration uses the same 512-sample harness, so the reported speed-up ratios
+are identical under either definition. `tools/make_figures.py` plots the
+512-sample rate and labels it as such.
+
 ## Build switches
 
 `firmware/main/bench_cfg.h` is the experiment control. The final build uses:
@@ -206,10 +220,26 @@ medians and fails if the 42 logit blocks are not byte-identical.
 - Task-level accuracy. The accuracy study is logit-level, at nine depths.
 - Other boards, models or context lengths. The paper reports one of each.
 
+## PDF checks
+
+All four release PDFs embed every font. `pdffonts` reports a mix of embedded
+Type 1 and CID TrueType fonts, and no Type 3 fonts. `qpdf --check` passes on
+all four files. All four builds are 19 pages.
+
+Before uploading any build, run the preflight gate on the exact file:
+
+```bash
+```
+
+It checks the title, page count, corrected metric wording, the eighteen-run
+bullet, the ESP-DSP commit, font embedding, and the anonymity or DOI rules.
+Every run must end in `OVERALL: PASS`.
+
 ## Known variance
 
-Sustained throughput across the six captures of the v1.2.0 build spans
-168.244 to 168.282 tokens/s, about 0.023%. The board is reflashed between
-captures, so that spread covers flash, boot and allocator placement, not only
-run-to-run noise. The two v1.1.0 baseline captures used in the A/B land at
-166.74 tokens/s.
+Sampled throughput across the six captures of the v1.2.0 build spans
+168.244 to 168.282 tokens/s (166.60 to 166.64 decode forwards/s), about
+0.023%. The board is reflashed between captures, so that spread covers flash,
+boot and allocator placement, not only run-to-run noise. The two v1.1.0
+baseline captures used in the A/B land at 166.74 sampled tokens/s (165.1 decode
+forwards/s).

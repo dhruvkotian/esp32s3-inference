@@ -5,12 +5,19 @@ changes exactly one switch or one kernel. This file maps the table rows to the
 raw capture that produced them, so a reader can check every number without
 trusting the paper.
 
-Sustained throughput is the median of the `RUN ctx` lines in each capture:
-`512 / gen_us * 1e6`, where `gen_us` is the decode wall time for 512 tokens
-after a five-token prompt. `tools/analyze_bench.py` and
-`tools/make_figures.py` use the same definition.
+The tabulated throughput is the median of the `RUN ctx` lines in each capture:
+`512 / gen_us * 1e6`, where `gen_us` is the decode wall time for 512 samples
+after a five-token prompt. This is the sampled-token rate.
 
-| Table 5 row | tokens/s | Raw capture |
+The paper's primary throughput is the decode-forward rate, 507 divided by the
+same wall time. The harness performs 507 decode forwards because the last five
+sampled tokens reuse the final logits. The two rates differ by the constant
+factor 507/512, so at the final build 168.25 sampled tokens/s is 166.6 decode
+forwards/s. Every configuration in this file uses the same harness, so the
+ratios are unchanged. `tools/analyze_bench.py` and `tools/make_figures.py` use
+the sampled-token definition.
+
+| Table 5 row | sampled tok/s | Raw capture |
 |---|---:|---|
 | fp32 KV, 64 KB, 1 core | 58.06 | `bench_fp32_64_single.log` |
 | int8 KV, dequantise on read | 46.52 | `bench_kvint8_c64_skip.log` |
@@ -29,7 +36,7 @@ reporting enabled, which is why it also lands at 123.22 tokens/s.
 
 ## Same-tree fp32 matrix (Table 4)
 
-| Cache | Cores | tokens/s | Attention us/token | Raw capture |
+| Cache | Cores | sampled tok/s | Attention us/token | Raw capture |
 |---|---:|---:|---:|---|
 | 32 KB | 1 | 48.85 | 19,360.4 | `bench_fp32_32_single.log` |
 | 32 KB | 2 | 62.58 | 14,867.9 | `bench_fp32_32_dual.log` |
@@ -38,7 +45,7 @@ reporting enabled, which is why it also lands at 123.22 tokens/s.
 
 ## Cache sensitivity (Fig. 6)
 
-| Build | tokens/s | Raw capture |
+| Build | sampled tok/s | Raw capture |
 |---|---:|---|
 | 32 KB final kernel | 157.48 | `bench_kvint8_fused_32kb.log` |
 | 64 KB final kernel | 168.25 | `bench_kvint8_fused_1.log` |
@@ -49,7 +56,7 @@ The 14.5% figure quoted for the pre-kernel comparison comes from
 
 ## Negative results (Table 7 and Section 10.2)
 
-| Variant | tokens/s | Raw capture |
+| Variant | sampled tok/s | Raw capture |
 |---|---:|---|
 | tiled V, no DMA | 86.29 | `bench_kvint8_tiled.log` |
 | tiled V + DMA, 64 B tiles | 49.56 | `bench_kvint8_dma.log` |
@@ -63,7 +70,8 @@ The 14.5% figure quoted for the pre-kernel comparison comes from
 
 `bench_kvint8_fused_1.log` through `bench_kvint8_fused_6.log` are independent
 captures of the final build, with the board reflashed between captures. They
-give the 168.24 to 168.28 tokens/s spread reported in Section 8. The older
+give the 168.24 to 168.28 sampled tokens/s spread (166.60 to 166.64 decode
+forwards/s) reported in Section 8. The older
 `bench_kvint8_final*.log` captures are the v1.1.0 kernel and remain the source
 for the `inline rounding` row.
 
@@ -112,7 +120,8 @@ blocks are not byte-identical.
 
 | Metric | v1.1.0 | v1.2.0 |
 |---|---:|---:|
-| Throughput (tokens/s) | 166.74 | 168.25 |
+| Sampled throughput (tokens/s) | 166.74 | 168.25 |
+| Decode-forward rate (forwards/s) | 165.1 | 166.6 |
 | Token (ms) | 5.998 | 5.944 |
 | Attention (ms) | 4.608 | 4.554 |
 | K dot (us) | 3314.7 | 3297.0 |

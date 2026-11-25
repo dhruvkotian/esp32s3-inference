@@ -193,11 +193,11 @@ def fig_throughput():
         smooth = rolling_median(tps, 9)
         ax.plot(pos, smooth, color=color, lw=1.8, label=label)
     ax.set_xlabel("Context position")
-    ax.set_ylabel("Throughput (tokens/s)")
+    ax.set_ylabel("Per-position decode rate (forwards/s)")
     ax.set_xlim(0, 512)
     ax.set_ylim(0, 750)
     ax.legend(frameon=False, fontsize=8, loc="upper right")
-    ax.set_title("Per-token throughput versus context position")
+    ax.set_title("Per-position decode rate versus context position")
     fig.tight_layout()
     fig.savefig(OUT / "fig_throughput_vs_position.png")
     fig.savefig(OUT / "fig_throughput_vs_position.pdf")
@@ -231,9 +231,9 @@ def fig_sustained():
                 ha="center", va="bottom", fontsize=7)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=7)
-    ax.set_ylabel("Sustained throughput (tokens/s)")
+    ax.set_ylabel("Sampled-token rate (tokens/s, 512 samples)")
     ax.set_ylim(0, 185)
-    ax.set_title("512-token sustained throughput, all bars from the same tree")
+    ax.set_title("512-sample rate, all bars from the same tree\ndecode forwards/s = 507/512 x bar")
     fig.tight_layout()
     fig.savefig(OUT / "fig_sustained_bar.png")
     fig.savefig(OUT / "fig_sustained_bar.pdf")
@@ -290,15 +290,25 @@ def fig_subprofile():
     colors = [c for k, n, c in order if k in ap]
     total = sum(vals)
 
-    fig, ax = plt.subplots(figsize=(5.6, 4.2))
-    wedges, texts, autotexts = ax.pie(
-        vals, labels=names, colors=colors, autopct=lambda p: f"{p:.1f}%",
-        startangle=90, counterclock=False,
-        wedgeprops={"linewidth": 1, "edgecolor": "white"},
-        textprops={"fontsize": 8},
-    )
-    ax.set_title("Attention sub-profile, both cores summed\n"
-                 f"{total / 1000.0:.1f} ms of core time per token", fontsize=9)
+    fig, ax = plt.subplots(figsize=(7.2, 2.9))
+    left = 0.0
+    for name, value, color in zip(names, vals, colors):
+        ax.barh([0], [value], left=left, color=color, height=0.46,
+                edgecolor="white", linewidth=1.0,
+                label=f"{name} ({value:.0f} us, {100.0 * value / total:.1f}%)")
+        pct = 100.0 * value / total
+        if pct >= 8.0:
+            ax.text(left + value / 2.0, 0, f"{pct:.1f}%", ha="center",
+                    va="center", color="white", fontsize=8)
+        left += value
+    ax.set_xlim(0, total * 1.01)
+    ax.set_ylim(-0.55, 0.55)
+    ax.set_yticks([])
+    ax.set_xlabel("Core time per token (us, both cores summed)")
+    ax.set_title("Attention sub-profile, both cores summed: "
+                 f"{total / 1000.0:.2f} ms of core time per token", fontsize=9)
+    ax.legend(frameon=False, fontsize=7.8, ncol=2, loc="upper center",
+              bbox_to_anchor=(0.5, -0.32))
     fig.tight_layout()
     fig.savefig(OUT / "fig_attention_subprofile.png")
     fig.savefig(OUT / "fig_attention_subprofile.pdf")
@@ -344,7 +354,7 @@ def fig_accuracy():
     ax2.set_xlabel("Context position")
     ax2.set_ylabel("Cosine similarity")
     ax2.set_ylim(0.9993, 1.00002)
-    ax2.set_title("Top-1 agreement: 9/9 on all three paths")
+    ax2.set_title("Top-1 vs FP32 reference: 9/9 all paths")
 
     fig.tight_layout()
     fig.savefig(OUT / "fig_accuracy_vs_depth.png")
@@ -414,9 +424,9 @@ def fig_cache():
                  ha="center", va="bottom", fontsize=8)
     ax1.set_xticks(x)
     ax1.set_xticklabels([l for l, _ in logs])
-    ax1.set_ylabel("Sustained tokens/s")
+    ax1.set_ylabel("Sampled tokens/s (512 samples)")
     ax1.set_ylim(0, 185)
-    ax1.set_title("Throughput")
+    ax1.set_title("Throughput (512-sample rate)")
 
     # The four sub-components are measured in CPU cycles per core and summed,
     # so their height is core time, not wall time. The wall attention total is
@@ -485,9 +495,9 @@ def fig_waterfall():
     ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=7.8)
     ax.invert_yaxis()
-    ax.set_xlabel("Sustained tokens/s at 512 context")
+    ax.set_xlabel("Sampled-token rate at 512 context (tokens/s)")
     ax.set_xlim(0, 205)
-    ax.set_title("Full optimisation chain, 64 KB cache")
+    ax.set_title("Full optimisation chain, 64 KB cache\ndecode forwards/s = 507/512 x bar")
     fig.tight_layout()
     fig.savefig(OUT / "fig_kernel_waterfall.png")
     fig.savefig(OUT / "fig_kernel_waterfall.pdf")

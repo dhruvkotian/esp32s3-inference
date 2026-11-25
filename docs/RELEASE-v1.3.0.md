@@ -1,9 +1,12 @@
 # v1.3.0 — Model library, PSRAM cache, and a measured MoE prototype
 
 Base: `v1.2.0` (the characterisation artifact). This release adds the model
-runtime and a synthetic expert prototype. It does not change the paper.
+runtime and a synthetic expert prototype. The paper is unchanged except for the
+manuscript title and abstract, which now match the ACM TECS submission; no other
+paper content, figures, or built PDFs are modified.
 
-The ACM TECS submission is **not** part of this repository or this release.
+This is a **local** release. It is not published to GitHub. The ACM TECS
+submission is **not** part of this repository or this release.
 
 ## Added
 

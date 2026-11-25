@@ -4,18 +4,23 @@
 
 | Item | Value |
 |---|---|
-| Board | ESP32-S3-CAM |
+| Board | ESP32-S3-CAM generic carrier |
+| Board vendor and revision | Not marked on the unit and not recorded |
 | MCU | ESP32-S3, dual-core Xtensa LX7 |
 | Clock | 240 MHz |
-| Silicon revision | 0.2 |
+| Silicon revision | 0.2, efuse block revision 1.3 |
 | Internal SRAM | 512 KB |
-| External PSRAM | 8 MB, octal, 80 MHz |
-| Flash | 16 MB, DIO mode, 80 MHz |
+| External PSRAM | 8 MB, octal, 80 MHz, AP Memory, device ID 0x02 (generation 3), 64 Mbit, 32 B burst |
+| PSRAM package order code | Not recorded |
+| Flash | 16 MB, Boya, DIO mode, 80 MHz |
 | Host link | CH343 USB-UART bridge, `/dev/ttyACM0`, 115200 baud |
 | Model storage | microSD card, FAT, `/sdcard/stories260K.bin`, `/sdcard/tok512.bin` |
 
-The camera is never initialised and is not part of any measurement. The board
-is used as a compute and memory substrate.
+The board is a generic ESP32-S3-CAM carrier. The vendor, board revision and
+module order code are not marked on the unit and were not recorded, so they are
+not claimed. The PSRAM details are the ones reported by the ESP-IDF boot
+probe. The camera is never initialised and is not part of any measurement. The
+board is used as a compute and memory substrate.
 
 ## Memory budget in the final build
 
@@ -32,8 +37,10 @@ is used as a compute and memory substrate.
 | Free internal SRAM after placement | 13,231 |
 | Largest free internal block | 7,680 |
 
-The KV cache lives in PSRAM because the weights and working buffers leave
-17,679 B free in internal SRAM, which is smaller than the 245,760 B cache.
+The PSRAM-resident int8 cache is 245,760 B; with the 20,480 B fp32 hot window
+it is 266,240 B in total. The cache lives in PSRAM because the weights and
+working buffers leave 17,679 B free in internal SRAM, which is smaller than the
+245,760 B PSRAM portion.
 
 ## Data cache
 

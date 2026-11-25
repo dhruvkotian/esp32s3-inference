@@ -6,7 +6,9 @@ abstract: >-
   decoder-only transformer running at batch size one on an ESP32-S3, with the
   key/value cache stored as int8 in external PSRAM and attention mapped onto
   the 128-bit integer SIMD unit. At 512-token context the final build sustains
-  168.25 tokens/s, 2.898x the same-tree fp32 single-core baseline. Firmware and
+  166.6 decode forwards/s, equivalent to 168.25 sampled tokens/s, 2.898x the
+  same-tree fp32 single-core baseline. The 512-sample harness performs 507
+  decode forwards. Firmware and
   tools are GPL-3.0-only; the bundled 260K model and tokenizer are MIT; the
   paper is CC BY 4.0.
 type: software
@@ -32,8 +34,8 @@ keywords:
 references:
   - type: article
     title: >-
-      Bytes, Not FLOPs: INT8 KV-Cache and Attention Optimisation for
-      Long-Context Transformer Inference on the ESP32-S3
+      Bytes, Not FLOPs: INT8 KV Caching and 128-bit PIE Attention on
+      ESP32-S3
     authors:
       - family-names: Kotian
         given-names: Dhruv

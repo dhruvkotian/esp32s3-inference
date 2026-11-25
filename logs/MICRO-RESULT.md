@@ -65,8 +65,9 @@ cache, dual core, three 512-token runs per capture. Baseline is v1.1.0
 
 | Metric | v1.1.0 | v1.2.0 | Change |
 |---|---:|---:|---:|
-| Throughput (tokens/s) | 166.74 | 168.25 | +0.91% |
-| Token (ms) | 5.998 | 5.944 | -0.90% |
+| Sampled throughput (tokens/s) | 166.74 | 168.25 | +0.91% |
+| Decode-forward rate (forwards/s) | 165.11 | 166.61 | +0.91% |
+| Sampled-token time (ms) | 5.998 | 5.944 | -0.90% |
 | Attention (ms) | 4.608 | 4.554 | -1.18% |
 | K dot ($\mu$s) | 3314.7 | 3297.0 | -0.54% |
 | Softmax ($\mu$s) | 3305.3 | 3302.9 | -0.07% |
@@ -75,8 +76,9 @@ cache, dual core, three 512-token runs per capture. Baseline is v1.1.0
 
 All 42 logit blocks are byte-identical between the two builds, so the
 kernel change is bit-exact. The spread over the 18 v1.2.0 runs
-is 168.24 to 168.28 tokens/s
-(0.023%).
+is 168.24 to 168.28 sampled tokens/s
+(166.60 to 166.64
+decode forwards/s), 0.023%.
 
 ## Conclusion
 
