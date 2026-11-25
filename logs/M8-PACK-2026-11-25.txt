@@ -1,0 +1,66 @@
+# CRC convention correction (2026-11-25, after the first on-device boot)
+# esp_rom_crc32_le(0, buf, len) on this target is the STANDARD reflected
+# CRC-32 with init/xorout 0xFFFFFFFF (the ROM wrapper inverts at entry and
+# exit). That is zlib.crc32(). The earlier "init 0, no final xor" variant
+# produced a header CRC the device rejected, so the packer, verifier and
+# logit_dump now all use zlib semantics.
+#
+# on-device boot and negative tests: logs/M8-BOOT-2026-11-25.log
+
+# .m8 packer + verifier, 2026-11-25 (refreshed after the CRC convention fix)
+# host-side only; firmware, partitions and the SD card were not modified by these steps
+
+## pack
+wrote /tmp/opencode/m8/stories260k-q8.m8 (290816 B, 284.0 KiB)
+  sha256 a1ca0be5eae35261cac49c60056ed7fb7201b7328e3c5f4b987e098372c61306
+  tensors 11, payload 286720 B, tokenizer 6227 B at 277472
+  id= 1 q8  512x64 stride=64 data@0+32768 scale@260608
+  id= 2 q8  320x64 stride=64 data@32768+20480 scale@262656
+  id= 3 q8  160x64 stride=64 data@53248+10240 scale@263936
+  id= 4 q8  160x64 stride=64 data@63488+10240 scale@264576
+  id= 5 q8  320x64 stride=64 data@73728+20480 scale@265216
+  id= 6 q8  860x64 stride=64 data@94208+55040 scale@266496
+  id= 7 q8  320x172 stride=176 data@149248+56320 scale@269936
+  id= 8 q8  860x64 stride=64 data@205568+55040 scale@271216
+  id= 9 f32 5x64 stride=256 data@274656+1280 scale@-
+  id=10 f32 5x64 stride=256 data@275936+1280 scale@-
+  id=11 f32 1x64 stride=256 data@277216+256 scale@-
+  sanity prompt=[1, 403, 407, 261, 378] top32 crc=0xb2f5d2bd ids=[432, 383, 286, 261, 376, 298, 315, 421, 395, 317, 426, 338]
+  quantizer matches tools/quant_ref.c byte-for-byte (274764 B)
+  deterministic: second pack is byte-identical
+
+## verify
+blob /tmp/opencode/m8/stories260k-q8.m8 (290816 B)
+  sha256 a1ca0be5eae35261cac49c60056ed7fb7201b7328e3c5f4b987e098372c61306
+  cfg dim=64 hidden=172 layers=5 heads=8 kv_heads=4 vocab=512 seq=512
+  payload=286720 B q=260608 scales=14048 norms=2816 tokenizer=6227
+  tokenizer range 277472..283699
+  sanity prompt=[1, 403, 407, 261, 378] top32 crc=0xb2f5d2bd ids=[432, 383, 286, 261, 376, 298, 315, 421]
+  header CRC, payload SHA-256, tensor bounds: OK
+  embedded tokenizer is byte-identical to the source: OK
+  rebuilt legacy v0 model: 1056540 B
+  tok_embeddings: max|err|=4.947e-03 max step=1.045e-02 bound_ratio=1.0000
+  wq: max|err|=7.050e-03 max step=1.458e-02 bound_ratio=0.9997
+  wk: max|err|=4.748e-03 max step=1.000e-02 bound_ratio=0.9999
+  wv: max|err|=1.802e-03 max step=3.734e-03 bound_ratio=0.9999
+  wo: max|err|=2.431e-03 max step=4.866e-03 bound_ratio=0.9998
+  w1: max|err|=2.767e-03 max step=5.575e-03 bound_ratio=0.9998
+  w2: max|err|=3.486e-03 max step=6.973e-03 bound_ratio=0.9999
+  w3: max|err|=2.398e-03 max step=4.804e-03 bound_ratio=0.9999
+  dequantised tensors are within half a quantisation step: OK
+  prompt tokens: [1, 403, 407, 261, 378]
+  blobby top5: [(432, 17.8059), (383, 14.3025), (322, 9.7029), (353, 9.5641), (323, 9.1442)]
+  blobby greedy ids: [432, 383, 286, 261, 376, 298, 315, 421, 395, 317, 426, 338]
+  device fp32 top5:  [(432, 17.7994), (383, 14.2813), (322, 9.7096), (353, 9.5873), (323, 9.1342)]
+  device int8 top1=432 fp32 top1=432
+  device greedy ids: [432, 383, 286, 261, 376, 298, 315, 421, 395, 317, 426, 338]
+  top1 match: True  top5 match: True  greedy match: True
+VERIFY OK
+
+## negative tests (host verifier)
+sha: rc=1 -> REJECT: payload SHA-256 mismatch
+trunc: rc=1 -> REJECT: file_bytes 290816 != actual 289816
+magic: rc=1 -> REJECT: bad magic b'X8B1'
+shape: rc=1 -> REJECT: tok_embeddings: data 32768 != 32704
+version: rc=1 -> REJECT: version 2
+flags: rc=1 -> REJECT: tok_embeddings: neither q8 nor f32

@@ -5,13 +5,16 @@
 //   2. run it with int8 weights + 128-bit vector dot products
 //   3. measure tokens/s at 240 MHz, then retry with a 320 MHz CPU overclock
 //
-// Nothing here writes to the card or the flash partitions.
+// The only card write is staging /sdcard/models/default.m8 from the flash
+// model partition when that file is absent. Flash is otherwise read-only.
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "esp_chip_info.h"
 #include "esp_private/esp_clk.h"
@@ -38,6 +41,7 @@
 
 #include "llm.h"
 #include "tokenizer.h"
+#include "model_lib.h"
 #include "bench_cfg.h"
 
 static const char *TAG = "llms3";
@@ -47,6 +51,7 @@ static const char *TAG = "llms3";
 #define SD_MMC_D0  40
 #define MODEL_PATH "/sdcard/stories260K.bin"
 #define TOK_PATH   "/sdcard/tok512.bin"
+#define M8_PATH    "/sdcard/models/default.m8"
 // 0 means "use the model's own seq_len" (512 for stories260K). The KV cache is
 // sized from this, so there is no reason to cap it below the trained context.
 #define CTX_TOKENS 0
@@ -199,7 +204,7 @@ static bool sd_mount(sdmmc_card_t **out_card)
         .allocation_unit_size = 16 * 1024,
     };
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;   // 40 MHz; the card reports 40 MHz
 
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 1;
@@ -225,7 +230,7 @@ static bool sd_mount(sdmmc_card_t **out_card)
 static void sd_raw_probe(void)
 {
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;   // 40 MHz
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 1;
     slot.clk = SD_MMC_CLK;
@@ -324,32 +329,42 @@ static void sd_list(const char *path)
 
 static uint8_t *load_sd(const char *path, size_t *out_size)
 {
-    FILE *f = fopen(path, "rb");
-    if (!f) {
+    // read() on the FATFS VFS reaches 4.36 MB/s with 64 KiB requests; the
+    // stdio fread() path measured 1.34 MB/s because of its internal buffer.
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
         ESP_LOGW(TAG, "open %s failed", path);
         return NULL;
     }
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) {
-        fclose(f);
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+        close(fd);
         return NULL;
     }
-    uint8_t *buf = heap_caps_malloc((size_t)sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t sz = (size_t)st.st_size;
+    uint8_t *buf = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
-        ESP_LOGE(TAG, "no PSRAM for %d bytes", (int)sz);
-        fclose(f);
+        ESP_LOGE(TAG, "no PSRAM for %u bytes", (unsigned)sz);
+        close(fd);
         return NULL;
     }
-    size_t rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    if (rd != (size_t)sz) {
-        ESP_LOGE(TAG, "short read %u/%d", (unsigned)rd, (int)sz);
-        free(buf);
-        return NULL;
+    size_t off = 0;
+    while (off < sz) {
+        size_t want = sz - off;
+        if (want > 64 * 1024) {
+            want = 64 * 1024;
+        }
+        ssize_t n = read(fd, buf + off, want);
+        if (n <= 0) {
+            ESP_LOGE(TAG, "short read %u/%u", (unsigned)off, (unsigned)sz);
+            free(buf);
+            close(fd);
+            return NULL;
+        }
+        off += (size_t)n;
     }
-    *out_size = (size_t)sz;
+    close(fd);
+    *out_size = sz;
     return buf;
 }
 
@@ -393,6 +408,13 @@ static bool sd_ensure_file(const char *path, const char *label)
     if (!buf) {
         return false;
     }
+    // The model partition may hold an .m8 blob while the card is being seeded.
+    // Never copy that over the legacy checkpoint path.
+    if (n >= 4 && memcmp(buf, "M8B1", 4) == 0) {
+        ESP_LOGW(TAG, "partition %s holds an .m8 blob, not a legacy model", label);
+        free(buf);
+        return false;
+    }
     FILE *f = fopen(path, "wb");
     if (!f) {
         ESP_LOGW(TAG, "cannot create %s on the card", path);
@@ -408,6 +430,178 @@ static bool sd_ensure_file(const char *path, const char *label)
         return false;
     }
     ESP_LOGI(TAG, "staged %s on the SD card (%u B)", path, (unsigned)n);
+    return true;
+}
+
+// One-time card seeding: if /sdcard/models/default.m8 is missing but the flash
+// model partition holds a length-prefixed .m8 blob, write it out. This is a
+// transport for the first flash of a new blob; the normal boot path only reads.
+static void m8_stage_from_partition(void)
+{
+    struct stat st;
+    if (stat(M8_PATH, &st) == 0 && st.st_size > 0) {
+        ESP_LOGI(TAG, "%s already on the card (%d B)", M8_PATH, (int)st.st_size);
+        return;
+    }
+    model_stage_t stage;
+    int rc = model_stage_partition("model", &stage);
+    if (rc != MODEL_OK) {
+        ESP_LOGI(TAG, "no .m8 blob in the model partition (%s)",
+                 model_strerror(rc));
+        return;
+    }
+    mkdir("/sdcard/models", 0777);
+    rc = model_stage_save(&stage, M8_PATH);
+    if (rc == MODEL_OK) {
+        ESP_LOGI(TAG, "staged %s from the model partition (%u B)",
+                 M8_PATH, (unsigned)stage.file_bytes);
+    } else {
+        ESP_LOGW(TAG, "could not stage %s (%s)", M8_PATH, model_strerror(rc));
+    }
+    model_stage_free(&stage);
+}
+
+// Boot the model. Prefers /sdcard/models/default.m8 and falls back to the
+// legacy fp32 checkpoint plus tok512.bin.
+//
+// Ordering matters: every byte is staged into PSRAM while the card is mounted,
+// then the card is unmounted before the int8 arena is allocated. The SDMMC and
+// FATFS buffers otherwise sit in internal SRAM and push the tail of the weights
+// into PSRAM (measured 250,368 B internal with the card mounted vs 260,608 B
+// with it unmounted).
+//
+// Consumes `card`: unmounts it when `sd_ok` is true. On success *out_m and
+// *out_tk are live and owned by the caller; legacy mode also leaves the fp32
+// checkpoint in m->raw for the reference path.
+static bool boot_model(sdmmc_card_t *card, bool sd_ok, int ctx,
+                       llm_t **out_m, tokenizer_t *out_tk, bool *out_m8,
+                       size_t *out_m8_bytes)
+{
+    *out_m = NULL;
+    *out_m8 = false;
+    *out_m8_bytes = 0;
+    memset(out_tk, 0, sizeof(*out_tk));
+
+    model_stage_t st;
+    memset(&st, 0, sizeof(st));
+    int m8rc = MODEL_ERR_IO;
+    if (sd_ok) {
+        // Seed the card from the flash partition on the first boot after a
+        // blob was written there. No-op when the file already exists.
+        m8_stage_from_partition();
+        m8rc = model_stage_file(M8_PATH, &st);
+    }
+    // The partition is a real fallback, not just a transport: with no card, or
+    // with a card that has no valid file, boot the blob straight from flash.
+    if (m8rc != MODEL_OK) {
+        int prc = model_stage_partition("model", &st);
+        if (prc == MODEL_OK) {
+            ESP_LOGI(TAG, "using the .m8 blob in the model partition");
+            m8rc = MODEL_OK;
+        } else if (m8rc == MODEL_ERR_IO && prc != MODEL_ERR_IO) {
+            m8rc = prc;
+        }
+    }
+    if (m8rc != MODEL_OK && m8rc != MODEL_ERR_IO && m8rc != MODEL_ERR_MAGIC &&
+        m8rc != MODEL_ERR_SIZE) {
+        ESP_LOGW(TAG, ".m8 rejected (%s); using the legacy checkpoint",
+                 model_strerror(m8rc));
+    }
+
+    size_t model_size = 0, tok_size = 0;
+    uint8_t *model_raw = NULL, *tok_raw = NULL;
+    if (m8rc != MODEL_OK) {
+        if (sd_ok) {
+            sd_ensure_file(MODEL_PATH, "model");
+            sd_ensure_file(TOK_PATH, "tok");
+            model_raw = load_sd(MODEL_PATH, &model_size);
+            tok_raw = load_sd(TOK_PATH, &tok_size);
+        }
+        if (!model_raw) {
+            model_raw = load_part("model", &model_size);
+        }
+        if (!tok_raw) {
+            tok_raw = load_part("tok", &tok_size);
+        }
+    }
+
+    if (sd_ok) {
+        esp_err_t ue = esp_vfs_fat_sdcard_unmount("/sdcard", card);
+        ESP_LOGI(TAG, "SD unmounted (%s); internal free=%u largest=%u",
+                 esp_err_to_name(ue),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        sd_ok = false;
+    }
+
+    llm_t *m = calloc(1, sizeof(llm_t));
+    if (!m) {
+        model_stage_free(&st);
+        free(model_raw);
+        free(tok_raw);
+        return false;
+    }
+
+    if (m8rc == MODEL_OK) {
+        size_t bytes = st.file_bytes;
+        int rc = model_commit(&st, m, out_tk);
+        model_stage_free(&st);
+        if (rc == MODEL_OK) {
+            ESP_LOGI(TAG, "model source: .m8 blob");
+            *out_m = m;
+            *out_m8 = true;
+            *out_m8_bytes = bytes;
+            return true;
+        }
+        ESP_LOGW(TAG, ".m8 commit failed (%s); retrying the legacy path",
+                 model_strerror(rc));
+        // Only reachable if the card has a blob but not a working legacy copy.
+        // Remount, read the fallback files, and unmount again before parsing.
+        if (!model_raw) {
+            sdmmc_card_t *c2 = NULL;
+            if (sd_mount(&c2)) {
+                sd_ensure_file(MODEL_PATH, "model");
+                sd_ensure_file(TOK_PATH, "tok");
+                model_raw = load_sd(MODEL_PATH, &model_size);
+                tok_raw = load_sd(TOK_PATH, &tok_size);
+                if (!model_raw) {
+                    model_raw = load_part("model", &model_size);
+                }
+                if (!tok_raw) {
+                    tok_raw = load_part("tok", &tok_size);
+                }
+                esp_vfs_fat_sdcard_unmount("/sdcard", c2);
+            }
+        }
+    }
+
+    if (!model_raw || !tok_raw) {
+        ESP_LOGE(TAG, "no usable model; stopping");
+        llm_free_state(m);
+        free(m);
+        free(model_raw);
+        free(tok_raw);
+        return false;
+    }
+    int rc = llm_parse(m, model_raw, model_size, ctx);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "model parse failed rc=%d", rc);
+        llm_free_state(m);
+        free(m);
+        free(model_raw);
+        free(tok_raw);
+        return false;
+    }
+    if (tok_parse(out_tk, tok_raw, tok_size, m->vocab_size) != 0) {
+        ESP_LOGE(TAG, "tokenizer parse failed");
+        llm_free_state(m);
+        free(m);
+        free(model_raw);
+        free(tok_raw);
+        return false;
+    }
+    ESP_LOGI(TAG, "model source: legacy checkpoint (%u B)", (unsigned)model_size);
+    *out_m = m;
     return true;
 }
 
@@ -905,60 +1099,32 @@ static void bench_main(void)
     sdmmc_card_t *card = NULL;
     bool sd_ok = sd_mount(&card);
 
-    size_t model_size = 0;
-    uint8_t *model_raw = NULL;
-    if (sd_ok) {
-        sd_ensure_file(MODEL_PATH, "model");
-        sd_ensure_file(TOK_PATH, "tok");
-        model_raw = load_sd(MODEL_PATH, &model_size);
-    }
-    if (!model_raw) {
-        model_raw = load_part("model", &model_size);
-    }
-    if (!model_raw) {
+    llm_t *m = NULL;
+    tokenizer_t tk;
+    bool m8 = false;
+    size_t m8_bytes = 0;
+    if (!boot_model(card, sd_ok, 0, &m, &tk, &m8, &m8_bytes)) {
         printf("FATAL no model\n");
         return;
     }
-
-    llm_t *m = calloc(1, sizeof(llm_t));
-    if (!m || llm_parse(m, model_raw, model_size, 0) != 0) {
-        printf("FATAL parse\n");
-        return;
-    }
     printf("CFG dim=%d hidden=%d layers=%d heads=%d kv_heads=%d vocab=%d "
-           "seq=%d ctx=%d hot=%d psram_weights=%d\n",
+           "seq=%d ctx=%d hot=%d psram_weights=%d m8=%d\n",
            m->dim, m->hidden_dim, m->n_layers, m->n_heads, m->n_kv_heads,
-           m->vocab_size, m->seq_len, m->ctx, m->hot, WEIGHTS_PSRAM);
-
-    size_t tok_size = 0;
-    uint8_t *tok_raw = NULL;
-    if (sd_ok) {
-        tok_raw = load_sd(TOK_PATH, &tok_size);
-    }
-    if (!tok_raw) {
-        tok_raw = load_part("tok", &tok_size);
-    }
-    if (!tok_raw) {
-        printf("FATAL no tokenizer\n");
-        return;
-    }
-    tokenizer_t tk;
-    if (tok_parse(&tk, tok_raw, tok_size, m->vocab_size) != 0) {
-        printf("FATAL tokenizer\n");
-        return;
+           m->vocab_size, m->seq_len, m->ctx, m->hot, WEIGHTS_PSRAM, m8 ? 1 : 0);
+    if (m8) {
+        printf("M8 bytes=%u prequantized\n", (unsigned)m8_bytes);
     }
 
-    if (sd_ok) {
-        esp_vfs_fat_sdcard_unmount("/sdcard", card);
-        sd_ok = false;
+    if (!m8) {
+        int64_t tq = esp_timer_get_time();
+        if (llm_quantize(m, !WEIGHTS_PSRAM) != 0) {
+            printf("FATAL quantize\n");
+            return;
+        }
+        printf("QUANT us=%lld\n", (long long)(esp_timer_get_time() - tq));
+    } else {
+        printf("QUANT skipped (m8 prequantized)\n");
     }
-
-    int64_t tq = esp_timer_get_time();
-    if (llm_quantize(m, !WEIGHTS_PSRAM) != 0) {
-        printf("FATAL quantize\n");
-        return;
-    }
-    printf("QUANT us=%lld\n", (long long)(esp_timer_get_time() - tq));
     bench_mem(m, "base");
 
     const char *prompt = "Once upon a time";
@@ -971,12 +1137,20 @@ static void bench_main(void)
     printf("\n");
 
 #if DUMP_LOGITS
-    bench_run(m, &tk, prompt, VAR_TOKENS, false, 0, "fp32", true);
+    if (!m8) {
+        // The fp32 path needs the legacy fp32 checkpoint, which an .m8 boot
+        // does not load. The int8 dump below is the one compared to golden.
+        bench_run(m, &tk, prompt, VAR_TOKENS, false, 0, "fp32", true);
+    }
     bench_run(m, &tk, prompt, VAR_TOKENS, true, 0, "int8", true);
 #endif
 
 #if KVCHECK
-    bench_kvcheck(m, &tk);
+    // bench_kvcheck drives llm_forward_f32, so it only applies to the legacy
+    // checkpoint. The int8 KV correctness coverage comes from the golden dump.
+    if (!m8) {
+        bench_kvcheck(m, &tk);
+    }
 #endif
 #if KV_INT8
     bench_kvmem(m, "int8only");
@@ -1055,67 +1229,21 @@ void app_main(void)
         sd_raw_probe();
     }
 
-    size_t model_size = 0;
-    uint8_t *model_raw = NULL;
-    if (sd_ok) {
-        sd_ensure_file(MODEL_PATH, "model");
-        sd_ensure_file(TOK_PATH, "tok");
-        model_raw = load_sd(MODEL_PATH, &model_size);
-        if (model_raw) {
-            ESP_LOGI(TAG, "model source: SD card");
-        }
-    }
-    if (!model_raw) {
-        ESP_LOGW(TAG, "falling back to flash partition 'model'");
-        model_raw = load_part("model", &model_size);
-        if (model_raw) {
-            ESP_LOGI(TAG, "model source: flash partition");
-        }
-    }
-    if (!model_raw) {
+    size_t m8_bytes = 0;
+    bool m8 = false;
+    llm_t *m = NULL;
+    tokenizer_t tk;
+    if (!boot_model(card, sd_ok, CTX_TOKENS, &m, &tk, &m8, &m8_bytes)) {
         ESP_LOGE(TAG, "no model available; stopping");
         return;
     }
-
-    llm_t *m = calloc(1, sizeof(llm_t));
-    int rc = llm_parse(m, model_raw, model_size, CTX_TOKENS);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "model parse failed rc=%d", rc);
-        return;
-    }
-    ESP_LOGI(TAG, "model: dim=%d hidden=%d layers=%d heads=%d kv_heads=%d vocab=%d seq=%d ctx=%d",
+    ESP_LOGI(TAG, "model: dim=%d hidden=%d layers=%d heads=%d kv_heads=%d vocab=%d seq=%d ctx=%d m8=%d",
              m->dim, m->hidden_dim, m->n_layers, m->n_heads, m->n_kv_heads,
-             m->vocab_size, m->seq_len, m->ctx);
-
-    size_t tok_size = 0;
-    uint8_t *tok_raw = NULL;
-    if (sd_ok) {
-        tok_raw = load_sd(TOK_PATH, &tok_size);
-    }
-    if (!tok_raw) {
-        tok_raw = load_part("tok", &tok_size);
-    }
-    if (!tok_raw) {
-        ESP_LOGE(TAG, "no tokenizer available; stopping");
-        return;
-    }
-    tokenizer_t tk;
-    if (tok_parse(&tk, tok_raw, tok_size, m->vocab_size) != 0) {
-        ESP_LOGE(TAG, "tokenizer parse failed");
-        return;
+             m->vocab_size, m->seq_len, m->ctx, m8 ? 1 : 0);
+    if (m8) {
+        ESP_LOGI(TAG, "source: .m8 blob (%u B), tokenizer embedded", (unsigned)m8_bytes);
     }
     ESP_LOGI(TAG, "tokenizer: vocab=%d max_token_len=%d", tk.vocab_size, tk.max_token_length);
-
-    // Both files are in PSRAM now, so the card is no longer needed. Unmounting
-    // releases its FATFS/SDMMC buffers from internal RAM, which is what decides
-    // whether the int8 weight slab fits in SRAM or spills to PSRAM.
-    if (sd_ok) {
-        esp_err_t ue = esp_vfs_fat_sdcard_unmount("/sdcard", card);
-        ESP_LOGI(TAG, "SD unmounted (%s); internal free=%u largest=%u", esp_err_to_name(ue),
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-        sd_ok = false;
-    }
 
     const char *prompt = "Once upon a time";
     int probe[32];
@@ -1128,23 +1256,32 @@ void app_main(void)
     ESP_LOGI(TAG, "prompt \"%s\" -> [%s]", prompt, pline);
 
     // Quantize before the fp32 run so the int8 weights get first pick of the
-    // internal heap, before anything else fragments it.
-    int64_t tq = esp_timer_get_time();
-    if (llm_quantize(m, true) != 0) {
-        ESP_LOGE(TAG, "quantize failed");
-        return;
+    // internal heap, before anything else fragments it. An .m8 boot already has
+    // prequantized weights in the arena.
+    if (!m8) {
+        int64_t tq = esp_timer_get_time();
+        if (llm_quantize(m, true) != 0) {
+            ESP_LOGE(TAG, "quantize failed");
+            return;
+        }
+        ESP_LOGI(TAG, "int8 quantize took %d us", (int)(esp_timer_get_time() - tq));
+    } else {
+        ESP_LOGI(TAG, "int8 weights came from the .m8 blob");
     }
-    ESP_LOGI(TAG, "int8 quantize took %d us", (int)(esp_timer_get_time() - tq));
     llm_print_mem(m);
 
     // ---- fp32 reference path (correctness) ----
-    gen_result_t gf;
-    int64_t t0 = esp_timer_get_time();
-    run_gen(m, &tk, prompt, GEN_TOKENS, false, &gf);
-    ESP_LOGI(TAG, "fp32 first pass done in %d us", (int)(esp_timer_get_time() - t0));
-    report_gen("fp32", &gf);
-    int bad = match_expected(&gf);
-    ESP_LOGI(TAG, "fp32 vs reference: %s", bad < 0 ? "MATCH" : "DIFFERS");
+    // Only the legacy checkpoint carries the fp32 tensors. The .m8 build is
+    // checked against the golden int8 logits instead.
+    if (!m8) {
+        gen_result_t gf;
+        int64_t t0 = esp_timer_get_time();
+        run_gen(m, &tk, prompt, GEN_TOKENS, false, &gf);
+        ESP_LOGI(TAG, "fp32 first pass done in %d us", (int)(esp_timer_get_time() - t0));
+        report_gen("fp32", &gf);
+        int bad = match_expected(&gf);
+        ESP_LOGI(TAG, "fp32 vs reference: %s", bad < 0 ? "MATCH" : "DIFFERS");
+    }
 
     // ---- int8 SIMD path ----
     memset(m->prof, 0, sizeof(m->prof));

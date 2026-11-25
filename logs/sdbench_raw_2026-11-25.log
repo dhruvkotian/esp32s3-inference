@@ -1,0 +1,156 @@
+cb÷ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0xb (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2810,len:0x1564
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xd24
+load:0x403cb700,len:0x2ed4
+entry 0x403c8928
+I (27) boot: ESP-IDF v5.4.4 2nd stage bootloader
+I (27) boot: compile time Nov 18 2026 21:47:41
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (30) boot: efuse block revision: v1.3
+I (33) boot.esp32s3: Boot SPI Speed : 80MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (45) boot: Enabling RNG early entropy source...
+I (49) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (65) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 factory          factory app      00 00 00010000 00200000
+I (78) boot:  3 model            Unknown data     01 40 00210000 00200000
+I (84) boot:  4 tok              Unknown data     01 41 00410000 00010000
+I (91) boot: End of partition table
+I (94) esp_image: segment 0: paddr=00010020 vaddr=3c030020 size=0d80ch ( 55308) map
+I (111) esp_image: segment 1: paddr=0001d834 vaddr=3fc92800 size=027e4h ( 10212) load
+I (114) esp_image: segment 2: paddr=00020020 vaddr=42000020 size=267f4h (157684) map
+I (144) esp_image: segment 3: paddr=0004681c vaddr=3fc94fe4 size=00858h (  2136) load
+I (145) esp_image: segment 4: paddr=0004707c vaddr=40374000 size=0e704h ( 59140) load
+I (161) esp_image: segment 5: paddr=00055788 vaddr=50000000 size=0001ch (    28) load
+I (167) boot: Loaded app from partition at offset 0x10000
+I (167) boot: Disabling RNG early entropy source...
+I (179) cpu_start: Multicore app
+I (187) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (188) cpu_start: Pro cpu start user code
+I (188) cpu_start: cpu freq: 240000000 Hz
+I (190) app_init: Application information:
+I (193) app_init: Project name:     sdbench
+I (197) app_init: App version:      1
+I (201) app_init: Compile time:     Nov 25 2026 10:40:08
+I (206) app_init: ELF file SHA256:  4fbb8add1...
+I (210) app_init: ESP-IDF:          v5.4.4
+I (214) efuse_init: Min chip rev:     v0.0
+I (218) efuse_init: Max chip rev:     v0.99 
+I (222) efuse_init: Chip rev:         v0.2
+I (226) heap_init: Initializing. RAM available for dynamic allocation:
+I (232) heap_init: At 3FC96190 len 00053580 (333 KiB): RAM
+I (237) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (242) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (247) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (254) spi_flash: detected chip: boya
+I (256) spi_flash: flash io: dio
+I (259) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (265) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (272) main_task: Started on CPU0
+I (312) main_task: Calling app_main()
+
+SD_BENCH_START
+SDINFO freq_req=20000 freq_actual=20000 width=1 capacity_sectors=62333952
+Name: SK32G
+Type: SDHC
+Speed: 20.00 MHz (limit: 20.00 MHz)
+Size: 30436MB
+CSD: ver=2, sector_size=512, capacity=62333952 read_bl_len=9
+SSR: bus_width=1
+SDRAW seq freq=20000 chunk=4096 bytes=4194304 us=2391924 mbps=1.754
+SDRAW seq freq=20000 chunk=4096 bytes=4194304 us=2331530 mbps=1.799
+SDRAW seq freq=20000 chunk=4096 bytes=4194304 us=2380429 mbps=1.762
+SDRAW seq_best freq=20000 chunk=4096 mbps=1.799
+SDRAW seq freq=20000 chunk=16384 bytes=4194304 us=1825080 mbps=2.298
+SDRAW seq freq=20000 chunk=16384 bytes=4194304 us=1810528 mbps=2.317
+SDRAW seq freq=20000 chunk=16384 bytes=4194304 us=1822141 mbps=2.302
+SDRAW seq_best freq=20000 chunk=16384 mbps=2.317
+SDRAW seq freq=20000 chunk=32768 bytes=4194304 us=1729743 mbps=2.425
+SDRAW seq freq=20000 chunk=32768 bytes=4194304 us=1722836 mbps=2.435
+SDRAW seq freq=20000 chunk=32768 bytes=4194304 us=1728239 mbps=2.427
+SDRAW seq_best freq=20000 chunk=32768 mbps=2.435
+SDRAW seq freq=20000 chunk=65536 bytes=4194304 us=1710912 mbps=2.452
+SDRAW seq freq=20000 chunk=65536 bytes=4194304 us=1707506 mbps=2.456
+SDRAW seq freq=20000 chunk=65536 bytes=4194304 us=1710244 mbps=2.452
+SDRAW seq_best freq=20000 chunk=65536 mbps=2.456
+SDRAW rand freq=20000 chunk=512 n=200 avg_us=410.4 min_us=368 max_us=664 mbps=1.247
+SDRAW rand freq=20000 chunk=4096 n=100 avg_us=1964.3 min_us=1848 max_us=3427 mbps=2.085
+SDRAW rand freq=20000 chunk=9216 n=100 avg_us=4022.3 min_us=3878 max_us=5485 mbps=2.291
+SDRAW rand freq=20000 chunk=17408 n=100 avg_us=7297.8 min_us=7171 max_us=8675 mbps=2.385
+SDRAW rand freq=20000 chunk=32768 n=100 avg_us=13512.4 min_us=13368 max_us=14979 mbps=2.425
+SDRAW rand freq=20000 chunk=35840 n=100 avg_us=14747.5 min_us=14628 max_us=15876 mbps=2.430
+SDRAW rand freq=20000 chunk=65536 n=100 avg_us=26723.6 min_us=26584 max_us=28190 mbps=2.452
+SDINFO freq_req=40000 freq_actual=40000 width=1 capacity_sectors=62333952
+Name: SK32G
+Type: SDHC
+Speed: 40.00 MHz (limit: 40.00 MHz)
+Size: 30436MB
+CSD: ver=2, sector_size=512, capacity=62333952 read_bl_len=9
+SSR: bus_width=1
+SDRAW seq freq=40000 chunk=4096 bytes=4194304 us=1546100 mbps=2.713
+SDRAW seq freq=40000 chunk=4096 bytes=4194304 us=1485575 mbps=2.823
+SDRAW seq freq=40000 chunk=4096 bytes=4194304 us=1534507 mbps=2.733
+SDRAW seq_best freq=40000 chunk=4096 mbps=2.823
+SDRAW seq freq=40000 chunk=16384 bytes=4194304 us=974133 mbps=4.306
+SDRAW seq freq=40000 chunk=16384 bytes=4194304 us=960112 mbps=4.369
+SDRAW seq freq=40000 chunk=16384 bytes=4194304 us=971197 mbps=4.319
+SDRAW seq_best freq=40000 chunk=16384 mbps=4.369
+SDRAW seq freq=40000 chunk=32768 bytes=4194304 us=884443 mbps=4.742
+SDRAW seq freq=40000 chunk=32768 bytes=4194304 us=877511 mbps=4.780
+SDRAW seq freq=40000 chunk=32768 bytes=4194304 us=882954 mbps=4.750
+SDRAW seq_best freq=40000 chunk=32768 mbps=4.780
+SDRAW seq freq=40000 chunk=65536 bytes=4194304 us=865579 mbps=4.846
+SDRAW seq freq=40000 chunk=65536 bytes=4194304 us=862211 mbps=4.865
+SDRAW seq freq=40000 chunk=65536 bytes=4194304 us=864898 mbps=4.849
+SDRAW seq_best freq=40000 chunk=65536 mbps=4.865
+SDRAW rand freq=40000 chunk=512 n=200 avg_us=305.7 min_us=263 max_us=562 mbps=1.675
+SDRAW rand freq=40000 chunk=4096 n=100 avg_us=1130.0 min_us=1017 max_us=2511 mbps=3.625
+SDRAW rand freq=40000 chunk=9216 n=100 avg_us=2161.8 min_us=2025 max_us=3537 mbps=4.263
+SDRAW rand freq=40000 chunk=17408 n=100 avg_us=3811.2 min_us=3687 max_us=5167 mbps=4.568
+SDRAW rand freq=40000 chunk=32768 n=100 avg_us=6904.4 min_us=6760 max_us=8385 mbps=4.746
+SDRAW rand freq=40000 chunk=35840 n=100 avg_us=7513.8 min_us=7396 max_us=8559 mbps=4.770
+SDRAW rand freq=40000 chunk=65536 n=100 avg_us=13510.1 min_us=13370 max_us=14992 mbps=4.851
+SDFAT mount us=52993 err=ESP_OK
+Name: SK32G
+Type: SDHC
+Speed: 40.00 MHz (limit: 40.00 MHz)
+Size: 30436MB
+CSD: ver=2, sector_size=512, capacity=62333952 read_bl_len=9
+SSR: bus_width=1
+SDFAT entry name=ESP32.TXT size=0 dir=0
+SDFAT entry name=NIHAO.TXT size=13 dir=0
+SDFAT entry name=FOO.TXT size=13 dir=0
+SDFAT entry name=STORIE~1.BIN size=1056540 dir=0
+SDFAT entry name=TOK512.BIN size=6227 dir=0
+SDFAT entries=5
+SDFAT file=/sdcard/STORIE~1.BIN size=1056540
+SDFAT seq chunk=4096 bytes=1056540 us=788876 mbps=1.339
+SDFAT seq chunk=4096 bytes=1056540 us=788966 mbps=1.339
+SDFAT seq chunk=16384 bytes=1056540 us=787645 mbps=1.341
+SDFAT seq chunk=16384 bytes=1056540 us=787659 mbps=1.341
+SDFAT seq chunk=65536 bytes=1056540 us=787303 mbps=1.342
+SDFAT seq chunk=65536 bytes=1056540 us=787369 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204634 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204671 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204680 mbps=1.342
+SDFAT rand chunk=9216 n=100 avg_us=7298.5 min_us=7209 max_us=7445 mbps=1.263
+SDFAT rand chunk=17408 n=100 avg_us=13413.4 min_us=13268 max_us=13546 mbps=1.298
+SDFAT rand chunk=35840 n=100 avg_us=27125.5 min_us=26896 max_us=27345 mbps=1.321
+SDFAT seq chunk=65536 bytes=1056540 us=245692 mbps=4.300
+SDFAT seq chunk=65536 bytes=1056540 us=245105 mbps=4.311
+SDFAT fd_seq chunk=4096 bytes=1056540 us=374366 mbps=2.822
+SDFAT fd_seq chunk=4096 bytes=1056540 us=373838 mbps=2.826
+SDFAT fd_seq chunk=65536 bytes=1056540 us=241825 mbps=4.369
+SDFAT fd_seq chunk=65536 bytes=1056540 us=242389 mbps=4.359
+SDFAT fd_rand chunk=35840 n=100 avg_us=8798.4 min_us=7988 max_us=10690 mbps=4.073
+SDFAT unmounted
+SD_BENCH_DONE

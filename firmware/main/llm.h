@@ -27,10 +27,16 @@ typedef struct {
     // here so the fp32 reference path can run on the same buffer)
     const float *f_tok_emb, *f_rms_att, *f_wq, *f_wk, *f_wv, *f_wo;
     const float *f_rms_ffn, *f_w1, *f_w2, *f_w3, *f_rms_final;
+    // Owned fp32 RMS norms when the model came from an .m8 blob instead of a
+    // legacy fp32 checkpoint. The f_rms_* pointers above view this buffer.
+    float *rms_store;
 
     // int8 copies of the 2D weight matrices
     qmat_t tok_emb, wq, wk, wv, wo, w1, w2, w3;
     bool int8_ready;
+    // Single allocation backing q/scale when the arena fits in one block; NULL
+    // when the biggest-first fallback allocated each matrix separately.
+    void *int8_slab;
 
     // run state
     int ctx;
@@ -90,8 +96,26 @@ typedef struct {
 // Parse a llama2.c v0 model already resident in memory.
 int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx);
 
+// Initialise the config and allocate the run state (scratch, KV caches,
+// rotary table) without a legacy fp32 buffer. The struct is zeroed first, so
+// *m must not hold live allocations. Used by llm_parse() and the .m8 loader.
+int llm_init_config(llm_t *m, int dim, int hidden_dim, int n_layers,
+                    int n_heads, int n_kv_heads, int vocab_size,
+                    int seq_len, int ctx);
+
 // Build the int8 copies from the fp32 tensors.
 int llm_quantize(llm_t *m, bool prefer_internal);
+// Split form: allocate the arena, then fill it. The .m8 loader uses the
+// allocator and copies prequantized bytes itself, so it never calls fill.
+int llm_int8_alloc(llm_t *m, bool prefer_internal);
+int llm_int8_fill(llm_t *m);
+// Log where the int8 q data landed (internal SRAM vs PSRAM).
+void llm_int8_report(const llm_t *m);
+
+// Free every allocation owned by *m: run state, int8 arena, .m8 norm buffer,
+// worker task and DMA handle. Safe on a zeroed struct. Must not be called
+// while a forward pass or the attention worker is running.
+void llm_free_state(llm_t *m);
 
 int llm_forward_f32(llm_t *m, int token, int pos, float *logits);
 int llm_forward_int8(llm_t *m, int token, int pos, float *logits);

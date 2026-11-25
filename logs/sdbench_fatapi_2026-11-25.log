@@ -1,0 +1,107 @@
+0ÛESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0xb (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2810,len:0x1564
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xd24
+load:0x403cb700,len:0x2ed4
+entry 0x403c8928
+I (27) boot: ESP-IDF v5.4.4 2nd stage bootloader
+I (27) boot: compile time Nov 18 2026 21:47:41
+I (27) boot: Multicore bootloader
+I (27) boot: chip revision: v0.2
+I (30) boot: efuse block revision: v1.3
+I (33) boot.esp32s3: Boot SPI Speed : 80MHz
+I (37) boot.esp32s3: SPI Mode       : DIO
+I (41) boot.esp32s3: SPI Flash Size : 16MB
+I (45) boot: Enabling RNG early entropy source...
+I (49) boot: Partition Table:
+I (52) boot: ## Label            Usage          Type ST Offset   Length
+I (58) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (65) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (71) boot:  2 factory          factory app      00 00 00010000 00200000
+I (78) boot:  3 model            Unknown data     01 40 00210000 00200000
+I (84) boot:  4 tok              Unknown data     01 41 00410000 00010000
+I (91) boot: End of partition table
+I (94) esp_image: segment 0: paddr=00010020 vaddr=3c030020 size=0d65ch ( 54876) map
+I (111) esp_image: segment 1: paddr=0001d684 vaddr=3fc92800 size=02994h ( 10644) load
+I (114) esp_image: segment 2: paddr=00020020 vaddr=42000020 size=26424h (156708) map
+I (144) esp_image: segment 3: paddr=0004644c vaddr=3fc95194 size=006a8h (  1704) load
+I (145) esp_image: segment 4: paddr=00046afc vaddr=40374000 size=0e704h ( 59140) load
+I (161) esp_image: segment 5: paddr=00055208 vaddr=50000000 size=0001ch (    28) load
+I (167) boot: Loaded app from partition at offset 0x10000
+I (167) boot: Disabling RNG early entropy source...
+I (179) cpu_start: Multicore app
+I (187) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (188) cpu_start: Pro cpu start user code
+I (188) cpu_start: cpu freq: 240000000 Hz
+I (189) app_init: Application information:
+I (193) app_init: Project name:     sdbench
+I (197) app_init: App version:      1
+I (201) app_init: Compile time:     Nov 25 2026 10:40:08
+I (206) app_init: ELF file SHA256:  687543163...
+I (210) app_init: ESP-IDF:          v5.4.4
+I (214) efuse_init: Min chip rev:     v0.0
+I (218) efuse_init: Max chip rev:     v0.99 
+I (222) efuse_init: Chip rev:         v0.2
+I (225) heap_init: Initializing. RAM available for dynamic allocation:
+I (232) heap_init: At 3FC96190 len 00053580 (333 KiB): RAM
+I (237) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (242) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (247) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (253) spi_flash: detected chip: boya
+I (256) spi_flash: flash io: dio
+I (259) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (265) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (272) main_task: Started on CPU0
+I (312) main_task: Calling app_main()
+
+SD_BENCH_START
+SDFAT mount us=49474 err=ESP_OK
+Name: SK32G
+Type: SDHC
+Speed: 40.00 MHz (limit: 40.00 MHz)
+Size: 30436MB
+CSD: ver=2, sector_size=512, capacity=62333952 read_bl_len=9
+SSR: bus_width=1
+SDFAT entry name=ESP32.TXT size=0 dir=0
+SDFAT entry name=NIHAO.TXT size=13 dir=0
+SDFAT entry name=FOO.TXT size=13 dir=0
+SDFAT entry name=STORIE~1.BIN size=1056540 dir=0
+SDFAT entry name=TOK512.BIN size=6227 dir=0
+SDFAT entries=5
+SDFAT file=/sdcard/STORIE~1.BIN size=1056540
+SDFAT seq chunk=4096 bytes=1056540 us=788474 mbps=1.340
+SDFAT seq chunk=4096 bytes=1056540 us=788573 mbps=1.340
+SDFAT seq chunk=16384 bytes=1056540 us=787275 mbps=1.342
+SDFAT seq chunk=16384 bytes=1056540 us=787225 mbps=1.342
+SDFAT seq chunk=65536 bytes=1056540 us=787122 mbps=1.342
+SDFAT seq chunk=65536 bytes=1056540 us=787128 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204660 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204658 mbps=1.342
+SDFAT seq chunk=32768 bytes=274656 us=204672 mbps=1.342
+SDFAT rand chunk=9216 n=100 avg_us=7302.8 min_us=7226 max_us=7417 mbps=1.262
+SDFAT rand chunk=17408 n=100 avg_us=13418.6 min_us=13271 max_us=13565 mbps=1.297
+SDFAT rand chunk=35840 n=100 avg_us=27132.5 min_us=26910 max_us=27355 mbps=1.321
+SDFAT phase=fread_setvbuf64k
+SDFAT seq chunk=32768 bytes=274656 us=76104 mbps=3.609
+SDFAT seq chunk=32768 bytes=274656 us=75883 mbps=3.619
+SDFAT seq chunk=32768 bytes=274656 us=75873 mbps=3.620
+SDFAT seq chunk=65536 bytes=1056540 us=245872 mbps=4.297
+SDFAT seq chunk=65536 bytes=1056540 us=244912 mbps=4.314
+SDFAT rand chunk=9216 n=100 avg_us=26696.5 min_us=38 max_us=31197 mbps=0.345
+SDFAT rand chunk=17408 n=100 avg_us=26845.8 min_us=65 max_us=31273 mbps=0.648
+SDFAT rand chunk=35840 n=100 avg_us=27711.9 min_us=111 max_us=31470 mbps=1.293
+SDFAT phase=read_fd
+SDFAT fd_seq chunk=32768 bytes=274656 us=63119 mbps=4.351
+SDFAT fd_seq chunk=32768 bytes=274656 us=62866 mbps=4.369
+SDFAT fd_seq chunk=32768 bytes=274656 us=62849 mbps=4.370
+SDFAT fd_seq chunk=65536 bytes=1056540 us=241960 mbps=4.367
+SDFAT fd_seq chunk=65536 bytes=1056540 us=242213 mbps=4.362
+SDFAT fd_rand chunk=9216 n=100 avg_us=2789.9 min_us=2148 max_us=4975 mbps=3.303
+SDFAT fd_rand chunk=17408 n=100 avg_us=4594.3 min_us=4047 max_us=6609 mbps=3.789
+SDFAT fd_rand chunk=35840 n=100 avg_us=8808.8 min_us=7992 max_us=10690 mbps=4.069
+SDFAT unmounted
+SD_BENCH_DONE

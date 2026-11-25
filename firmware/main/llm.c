@@ -19,6 +19,8 @@
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #if DMA_PREFETCH
 #include "esp_async_memcpy.h"
 #endif
@@ -294,7 +296,7 @@ static void mm_q(llm_t *m, float *out, const float *x, const qmat_t *W, int row0
     mm_q_pre(m, out, W, row0, nrows, xs);
 }
 
-int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
+static void luts_init_once(void)
 {
     static bool luts_ready;
     if (!luts_ready) {
@@ -303,67 +305,15 @@ int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
         luts_ready = true;
         ESP_LOGI(TAG, "exp/silu tables built in %d us", (int)(esp_timer_get_time() - t0));
     }
-    memset(m, 0, sizeof(*m));
-    if (size < 28) {
-        return -1;
-    }
-    int32_t hdr[7];
-    memcpy(hdr, raw, sizeof(hdr));
-    m->dim = hdr[0];
-    m->hidden_dim = hdr[1];
-    m->n_layers = hdr[2];
-    m->n_heads = hdr[3];
-    m->n_kv_heads = hdr[4];
-    m->vocab_size = hdr[5];
-    m->seq_len = hdr[6];
-    if (m->vocab_size < 0) {
-        ESP_LOGE(TAG, "unshared classifier is not supported");
-        return -2;
-    }
-    if (m->dim <= 0 || m->n_heads <= 0 || m->n_kv_heads <= 0 ||
-        m->n_heads % m->n_kv_heads != 0 || m->dim % m->n_heads != 0) {
-        ESP_LOGE(TAG, "invalid config");
-        return -2;
-    }
-    m->kv_dim = m->dim * m->n_kv_heads / m->n_heads;
-    m->head_size = m->dim / m->n_heads;
-    m->kv_mul = m->n_heads / m->n_kv_heads;
-    m->ctx = (ctx > 0 && ctx < m->seq_len) ? ctx : m->seq_len;
-    m->raw = raw;
-    m->raw_size = size;
+}
 
+// Allocate the per-token scratch, the K/V caches and the rotary table. Split
+// out of llm_parse so the .m8 loader can reuse it: the loader knows the
+// dimensions from the blob header and does not have a legacy fp32 buffer.
+static int llm_alloc_state(llm_t *m)
+{
     const int dim = m->dim, hid = m->hidden_dim, nl = m->n_layers;
-    const int kv = m->kv_dim, vocab = m->vocab_size, hs = m->head_size;
-
-    size_t off = 28, o;
-    if (!take(&off, (size_t)vocab * dim, size, &o)) return -3;
-    m->f_tok_emb = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * dim, size, &o)) return -3;
-    m->f_rms_att = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * dim * dim, size, &o)) return -3;
-    m->f_wq = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * kv * dim, size, &o)) return -3;
-    m->f_wk = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * kv * dim, size, &o)) return -3;
-    m->f_wv = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * dim * dim, size, &o)) return -3;
-    m->f_wo = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * dim, size, &o)) return -3;
-    m->f_rms_ffn = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * hid * dim, size, &o)) return -3;
-    m->f_w1 = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * dim * hid, size, &o)) return -3;
-    m->f_w2 = (const float *)(raw + o);
-    if (!take(&off, (size_t)nl * hid * dim, size, &o)) return -3;
-    m->f_w3 = (const float *)(raw + o);
-    if (!take(&off, (size_t)dim, size, &o)) return -3;
-    m->f_rms_final = (const float *)(raw + o);
-    // RoPE tables written by the legacy exporter; run.c recomputes them.
-    if (!take(&off, (size_t)m->seq_len * m->head_size / 2, size, &o)) return -3;
-    if (!take(&off, (size_t)m->seq_len * m->head_size / 2, size, &o)) return -3;
-    if (off != size) {
-        ESP_LOGW(TAG, "model layout consumed %u of %u bytes", (unsigned)off, (unsigned)size);
-    }
+    const int kv = m->kv_dim, vocab = m->vocab_size;
 
     m->x = al(dim * sizeof(float), true, false);
     m->xb = al(dim * sizeof(float), true, false);
@@ -382,8 +332,8 @@ int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
     m->value_scale = al((size_t)nl * m->ctx * m->n_kv_heads * sizeof(float), false, false);
     m->ktmp = al((size_t)kv * sizeof(float), true, false);
     m->vtmp = al((size_t)kv * sizeof(float), true, false);
-    m->kdeq = al((size_t)hs * sizeof(float), true, false);
-    m->vdeq = al((size_t)hs * sizeof(float), true, false);
+    m->kdeq = al((size_t)m->head_size * sizeof(float), true, false);
+    m->vdeq = al((size_t)m->head_size * sizeof(float), true, false);
     m->qpad = al((size_t)m->n_heads * 16, true, true);
     m->qscale = al((size_t)m->n_heads * sizeof(float), true, false);
     m->a8 = al((size_t)m->ctx, true, true);
@@ -409,8 +359,8 @@ int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
         m->hot = m->ctx;
     }
     if (m->hot > 0) {
-        m->khot = al((size_t)nl * m->n_kv_heads * m->hot * hs * sizeof(float), true, false);
-        m->vhot = al((size_t)nl * m->n_kv_heads * m->hot * hs * sizeof(float), true, false);
+        m->khot = al((size_t)nl * m->n_kv_heads * m->hot * m->head_size * sizeof(float), true, false);
+        m->vhot = al((size_t)nl * m->n_kv_heads * m->hot * m->head_size * sizeof(float), true, false);
     }
     if (!m->x || !m->xb || !m->xb2 || !m->qbuf || !m->hb || !m->hb2 ||
         !m->att || !m->logits || !m->key_cache || !m->value_cache ||
@@ -479,6 +429,160 @@ int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
     return 0;
 }
 
+void llm_free_state(llm_t *m)
+{
+#if DUAL_CORE
+    // The worker blocks on a notification between layers, so deleting it here
+    // is safe as long as no forward pass is in flight.
+    if (m->attn_task) {
+        vTaskDelete((TaskHandle_t)m->attn_task);
+        m->attn_task = NULL;
+    }
+#endif
+#if DMA_PREFETCH
+    if (m->dma) {
+        esp_async_memcpy_uninstall((async_memcpy_handle_t)m->dma);
+        m->dma = NULL;
+    }
+#endif
+    if (m->int8_slab) {
+        // q and scale point inside the slab; freeing them individually would
+        // be a double free.
+        free(m->int8_slab);
+        m->int8_slab = NULL;
+    } else {
+        qmat_t *all[] = { &m->tok_emb, &m->wq, &m->wk, &m->wv,
+                          &m->wo, &m->w1, &m->w2, &m->w3 };
+        for (int i = 0; i < 8; i++) {
+            free(all[i]->q);
+            free(all[i]->scale);
+        }
+    }
+    free(m->x);
+    free(m->xb);
+    free(m->xb2);
+    free(m->qbuf);
+    free(m->hb);
+    free(m->hb2);
+    free(m->att);
+    free(m->logits);
+    free(m->key_cache);
+    free(m->value_cache);
+#if KV_INT8
+    free(m->key_q);
+    free(m->value_q);
+    free(m->key_scale);
+    free(m->value_scale);
+    free(m->ktmp);
+    free(m->vtmp);
+    free(m->kdeq);
+    free(m->vdeq);
+    free(m->qpad);
+    free(m->qscale);
+    free(m->a8);
+#if DMA_PREFETCH
+    free(m->vbuf0);
+    free(m->vbuf1);
+#endif
+#endif
+#if DUAL_CORE
+    free(m->att2);
+    free(m->a8_2);
+#endif
+    free(m->khot);
+    free(m->vhot);
+    free(m->rope_cos);
+    free(m->rope_sin);
+    free(m->qx);
+    free(m->rms_store);
+    memset(m, 0, sizeof(*m));
+}
+
+int llm_init_config(llm_t *m, int dim, int hidden_dim, int n_layers,
+                    int n_heads, int n_kv_heads, int vocab_size,
+                    int seq_len, int ctx)
+{
+    luts_init_once();
+    memset(m, 0, sizeof(*m));
+    if (dim <= 0 || hidden_dim <= 0 || n_layers <= 0 || n_heads <= 0 ||
+        n_kv_heads <= 0 || vocab_size <= 0 || seq_len <= 0) {
+        ESP_LOGE(TAG, "invalid config");
+        return -2;
+    }
+    if (n_heads % n_kv_heads != 0 || dim % n_heads != 0) {
+        ESP_LOGE(TAG, "invalid head geometry");
+        return -2;
+    }
+    m->dim = dim;
+    m->hidden_dim = hidden_dim;
+    m->n_layers = n_layers;
+    m->n_heads = n_heads;
+    m->n_kv_heads = n_kv_heads;
+    m->vocab_size = vocab_size;
+    m->seq_len = seq_len;
+    m->kv_dim = dim * n_kv_heads / n_heads;
+    m->head_size = dim / n_heads;
+    m->kv_mul = n_heads / n_kv_heads;
+    m->ctx = (ctx > 0 && ctx < seq_len) ? ctx : seq_len;
+    int rc = llm_alloc_state(m);
+    if (rc != 0) {
+        llm_free_state(m);
+        return rc;
+    }
+    return 0;
+}
+
+int llm_parse(llm_t *m, uint8_t *raw, size_t size, int ctx)
+{
+    if (size < 28) {
+        memset(m, 0, sizeof(*m));
+        return -1;
+    }
+    int32_t hdr[7];
+    memcpy(hdr, raw, sizeof(hdr));
+    int rc = llm_init_config(m, hdr[0], hdr[1], hdr[2], hdr[3], hdr[4],
+                             hdr[5], hdr[6], ctx);
+    if (rc != 0) {
+        return rc;
+    }
+    m->raw = raw;
+    m->raw_size = size;
+
+    const int dim = m->dim, hid = m->hidden_dim, nl = m->n_layers;
+    const int kv = m->kv_dim, vocab = m->vocab_size;
+
+    size_t off = 28, o;
+    if (!take(&off, (size_t)vocab * dim, size, &o)) return -3;
+    m->f_tok_emb = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * dim, size, &o)) return -3;
+    m->f_rms_att = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * dim * dim, size, &o)) return -3;
+    m->f_wq = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * kv * dim, size, &o)) return -3;
+    m->f_wk = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * kv * dim, size, &o)) return -3;
+    m->f_wv = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * dim * dim, size, &o)) return -3;
+    m->f_wo = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * dim, size, &o)) return -3;
+    m->f_rms_ffn = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * hid * dim, size, &o)) return -3;
+    m->f_w1 = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * dim * hid, size, &o)) return -3;
+    m->f_w2 = (const float *)(raw + o);
+    if (!take(&off, (size_t)nl * hid * dim, size, &o)) return -3;
+    m->f_w3 = (const float *)(raw + o);
+    if (!take(&off, (size_t)dim, size, &o)) return -3;
+    m->f_rms_final = (const float *)(raw + o);
+    // RoPE tables written by the legacy exporter; run.c recomputes them.
+    if (!take(&off, (size_t)m->seq_len * m->head_size / 2, size, &o)) return -3;
+    if (!take(&off, (size_t)m->seq_len * m->head_size / 2, size, &o)) return -3;
+    if (off != size) {
+        ESP_LOGW(TAG, "model layout consumed %u of %u bytes", (unsigned)off, (unsigned)size);
+    }
+    return 0;
+}
+
 static int qmat_init(qmat_t *q, int rows, int cols, bool internal)
 {
     q->rows = rows;
@@ -516,25 +620,30 @@ static void qmat_fill(qmat_t *q, const float *src)
     }
 }
 
-int llm_quantize(llm_t *m, bool prefer_internal)
+typedef struct {
+    qmat_t *q;
+    int rows, cols;
+    const float *src;
+} qspec_t;
+
+static void build_qspecs(llm_t *m, qspec_t s[8])
 {
     const int dim = m->dim, hid = m->hidden_dim, nl = m->n_layers;
     const int kv = m->kv_dim, vocab = m->vocab_size;
+    s[0] = (qspec_t){ &m->tok_emb, vocab, dim, m->f_tok_emb };
+    s[1] = (qspec_t){ &m->wq, nl * dim, dim, m->f_wq };
+    s[2] = (qspec_t){ &m->wk, nl * kv, dim, m->f_wk };
+    s[3] = (qspec_t){ &m->wv, nl * kv, dim, m->f_wv };
+    s[4] = (qspec_t){ &m->wo, nl * dim, dim, m->f_wo };
+    s[5] = (qspec_t){ &m->w1, nl * hid, dim, m->f_w1 };
+    s[6] = (qspec_t){ &m->w2, nl * dim, hid, m->f_w2 };
+    s[7] = (qspec_t){ &m->w3, nl * hid, dim, m->f_w3 };
+}
 
-    struct spec {
-        qmat_t *q;
-        int rows, cols;
-        const float *src;
-    } specs[8] = {
-        { &m->tok_emb, vocab, dim, m->f_tok_emb },
-        { &m->wq, nl * dim, dim, m->f_wq },
-        { &m->wk, nl * kv, dim, m->f_wk },
-        { &m->wv, nl * kv, dim, m->f_wv },
-        { &m->wo, nl * dim, dim, m->f_wo },
-        { &m->w1, nl * hid, dim, m->f_w1 },
-        { &m->w2, nl * dim, hid, m->f_w2 },
-        { &m->w3, nl * hid, dim, m->f_w3 },
-    };
+int llm_int8_alloc(llm_t *m, bool prefer_internal)
+{
+    qspec_t specs[8];
+    build_qspecs(m, specs);
 
     // One slab for everything. Per-matrix allocations fragment the internal
     // heap badly enough that one 55 KB matrix ends up in PSRAM, which costs
@@ -564,6 +673,7 @@ int llm_quantize(llm_t *m, bool prefer_internal)
                  (unsigned)total,
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     }
+    m->int8_slab = slab;
 
     size_t off = 0;
     int order[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -602,16 +712,14 @@ int llm_quantize(llm_t *m, bool prefer_internal)
             }
         }
     }
+    return 0;
+}
 
-    for (int i = 0; i < 8; i++) {
-        qmat_fill(specs[i].q, specs[i].src);
-    }
-    m->int8_ready = true;
-
-    // Placement matters far more than total size here: a matrix that lands in
-    // PSRAM costs roughly an order of magnitude more per element to read.
+void llm_int8_report(const llm_t *m)
+{
     size_t in_sram = 0, in_psram = 0;
-    const qmat_t *all[] = { &m->tok_emb, &m->wq, &m->wk, &m->wv, &m->wo, &m->w1, &m->w2, &m->w3 };
+    const qmat_t *all[] = { &m->tok_emb, &m->wq, &m->wk, &m->wv,
+                            &m->wo, &m->w1, &m->w2, &m->w3 };
     for (int i = 0; i < 8; i++) {
         size_t n = (size_t)all[i]->rows * all[i]->stride;
         if (esp_ptr_internal(all[i]->q)) {
@@ -621,8 +729,32 @@ int llm_quantize(llm_t *m, bool prefer_internal)
         }
     }
     ESP_LOGI(TAG, "int8 weights placed: %u B internal SRAM, %u B PSRAM (slab %s)",
-             (unsigned)in_sram, (unsigned)in_psram, slab ? "yes" : "no");
+             (unsigned)in_sram, (unsigned)in_psram, m->int8_slab ? "yes" : "no");
+}
+
+int llm_int8_fill(llm_t *m)
+{
+    qspec_t specs[8];
+    build_qspecs(m, specs);
+    for (int i = 0; i < 8; i++) {
+        if (!specs[i].q->q || !specs[i].q->scale) {
+            ESP_LOGE(TAG, "int8 arena incomplete");
+            return -1;
+        }
+        qmat_fill(specs[i].q, specs[i].src);
+    }
+    m->int8_ready = true;
+    llm_int8_report(m);
     return 0;
+}
+
+int llm_quantize(llm_t *m, bool prefer_internal)
+{
+    int rc = llm_int8_alloc(m, prefer_internal);
+    if (rc != 0) {
+        return rc;
+    }
+    return llm_int8_fill(m);
 }
 
 size_t llm_int8_bytes(const llm_t *m)

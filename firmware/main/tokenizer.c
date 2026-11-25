@@ -11,6 +11,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+void tok_free(tokenizer_t *t)
+{
+    if (!t) {
+        return;
+    }
+    free(t->vocab);
+    free(t->scores);
+    free(t->pool);
+    memset(t, 0, sizeof(*t));
+}
+
 int tok_parse(tokenizer_t *t, const uint8_t *blob, size_t size, int vocab_size)
 {
     memset(t, 0, sizeof(*t));
@@ -23,6 +34,7 @@ int tok_parse(tokenizer_t *t, const uint8_t *blob, size_t size, int vocab_size)
     t->scores = calloc((size_t)vocab_size, sizeof(float));
     t->pool = malloc(size + (size_t)vocab_size + 1);
     if (!t->vocab || !t->scores || !t->pool) {
+        tok_free(t);
         return -2;
     }
 
@@ -30,6 +42,7 @@ int tok_parse(tokenizer_t *t, const uint8_t *blob, size_t size, int vocab_size)
     size_t poff = 0;
     for (int i = 0; i < vocab_size; i++) {
         if (off + 8 > size) {
+            tok_free(t);
             return -3;
         }
         float score;
@@ -39,6 +52,7 @@ int tok_parse(tokenizer_t *t, const uint8_t *blob, size_t size, int vocab_size)
         memcpy(&len, blob + off, 4);
         off += 4;
         if (len < 0 || off + (size_t)len > size) {
+            tok_free(t);
             return -3;
         }
         t->scores[i] = score;

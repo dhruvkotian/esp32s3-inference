@@ -1,0 +1,55 @@
+# .m8 loader negative tests on the ESP32-S3, 2026-11-25
+# source: the blob was written to the flash 'model' partition as
+#         u32 length + blob, and the test build skipped the SD file.
+# Every case must be rejected before any allocation, then fall back.
+
+## sha: payload byte at 4096+1000 flipped
+# expected MODEL_ERR_SHA
+E (1094) model: payload SHA-256 mismatch
+I (1993) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## trunc: file truncated by 1000 B, header sizes unchanged
+# expected MODEL_ERR_SIZE
+E (1085) model: size mismatch header=290816 actual=289816 payload=286720
+I (1980) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## magic: magic "M8B1" -> "X8B1"
+# expected MODEL_ERR_MAGIC
+E (1085) model: bad magic 58384231
+I (1977) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## shape: tok_emb rows 512 -> 511, header CRC recomputed
+# expected MODEL_ERR_SHAPE
+E (1095) model: tensor id=1: unexpected shape 511x64
+I (1994) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## version: version 1 -> 2, header CRC recomputed
+# expected MODEL_ERR_VERSION
+E (1085) model: unsupported version/header 2/4096
+I (1984) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## flags: tok_emb kind bits cleared, header CRC recomputed
+# expected MODEL_ERR_SHAPE (flags 0x4 has neither q8 nor f32)
+E (1094) model: tensor id=1: flags 0x4
+I (1992) llms3: model source: legacy checkpoint (1056540 B)
+BENCH_DONE
+
+## tokenizer: first token length 5 -> 0x7ffffff0, payload SHA-256 and
+#            header CRC recomputed so both pass
+# expected MODEL_ERR_TOKENIZER from the semantic parse. Unlike the header-
+# level cases, this one runs after llm_init_config, the norms copy and the
+# int8 arena fill, so it also exercises the post-allocation cleanup path:
+# the arena is freed, the card is remounted, and the legacy checkpoint is
+# parsed from scratch.
+I (1094) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (1269) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+E (1270) model: embedded tokenizer rejected
+W (1275) llms3: .m8 commit failed (tokenizer); retrying the legacy path
+I (2258) llms3: model source: legacy checkpoint (1056540 B)
+I (2323) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+BENCH_DONE

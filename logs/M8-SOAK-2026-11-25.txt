@@ -1,0 +1,37 @@
+# .m8 boot soak, ESP32-S3-CAM, 2026-11-25
+#
+# Test build: M8_TEST_PARTITION_ONLY=1, DUMP_LOGITS=0. The valid blob was
+# written to the flash 'model' partition as u32 length + blob, and the test
+# build ignored /sdcard/models/default.m8 entirely, so every boot staged,
+# validated and committed the blob from flash. That is the same code path
+# used when the card is absent.
+#
+# Each cycle is a reset pulse (EN) followed by capture until 'sanity ok'.
+
+boot  source  sanity top-32 CRC  int8 placement
+----  ------  ----------------  ---------------
+01    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+02    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+03    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+04    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+05    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+06    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+07    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+08    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+09    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+10    .m8 blob  top32 crc=0xb2f5d2bd  260608 B internal SRAM, 0 B PSRAM  OK
+
+Result: 10/10 boots reached the sanity check;
+every one reported the same top-32 CRC and the same int8 placement.
+
+## boot01, selected lines
+I (1042) llms3: SD mounted in 78747 us
+I (1095) model: blob ok: 290816 B, name="stories260k-q8" build="packer1 b0a507e7ad0f"
+I (1111) llms3: using the .m8 blob in the model partition
+I (1269) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (1271) model: tokenizer: vocab=512 max_token_len=7
+I (1292) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (1292) llms3: model source: .m8 blob
+
+# Not covered here: physically removing the card during a read. The board is
+# on a desk with no remote access to the slot, so that remains a manual test.
