@@ -26,6 +26,7 @@
 #include "esp_partition.h"
 #include "esp_psram.h"
 #include "esp_rom_sys.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
@@ -44,6 +45,7 @@
 #include "tokenizer.h"
 #include "model_lib.h"
 #include "model_prefs.h"
+#include "moe.h"
 #include "bench_cfg.h"
 
 static const char *TAG = "llms3";
@@ -70,6 +72,13 @@ static model_ctx_t g_model;
 #define LIB_TEST 0
 #endif
 #define MODEL_LIST_MAX 12
+
+// Synthetic MoE harness (temporary; off in the published build).
+#ifndef MOE_TEST
+#define MOE_TEST 0
+#endif
+#define MOE_PATH      "/sdcard/models/moe.bin"
+#define MOE_TEST_REPS 8
 
 // Runtime-switch harness. Off in normal builds; the test build enables it in
 // bench_cfg.h. M8_TEST_PARTITION_ONLY is test scaffolding too: it boots the
@@ -1146,6 +1155,230 @@ static void lib_test(model_ctx_t *ctx, int mode)
 }
 #endif
 
+#if MOE_TEST
+// Test-only provisioning: copy the sidecar in the flash model partition to
+// /sdcard/models/moe.bin. Called with the card mounted, before boot_model().
+static void moe_provision(void)
+{
+    moe_stage_t st;
+    int rc = moe_stage_partition("model", &st);
+    if (rc != MOE_OK) {
+        printf("MOE_PROV rc=%d (%s)\n", rc, moe_strerror(rc));
+        fflush(stdout);
+        return;
+    }
+    mkdir(MODEL_DIR, 0777);
+    uint32_t bytes = (uint32_t)st.file_bytes;
+    int experts = st.experts;
+    rc = moe_stage_save(&st, MOE_PATH);
+    printf("MOE_PROV rc=%d bytes=%u experts=%d path=%s\n", rc,
+           (unsigned)bytes, experts, MOE_PATH);
+    moe_stage_free(&st);
+    fflush(stdout);
+}
+
+static uint32_t ids_crc(const gen_result_t *g)
+{
+    return esp_rom_crc32_le(0, (const uint8_t *)g->ids,
+                            (uint32_t)(g->n_gen * sizeof(g->ids[0])));
+}
+
+// One forward at position 0 over a fixed token, hashed across all logits. This
+// makes the forced-expert comparison independent of sampling.
+static uint32_t moe_logit_crc(llm_t *m, tokenizer_t *tk)
+{
+    int t[8];
+    int n = tok_encode(tk, "Once", 1, t, 8);
+    int tok = n > 0 ? t[0] : 1;
+    llm_forward_int8(m, tok, 0, m->logits);
+    return esp_rom_crc32_le(0, (const uint8_t *)m->logits,
+                            (uint32_t)(m->vocab_size * sizeof(float)));
+}
+
+// Replay the prompt `reps` times from position 0 and return the elapsed time.
+// Warm-up runs are excluded so forced-expert runs do not include their initial
+// five-layer refill. Statistics are reset just before the measured window.
+static uint32_t moe_time(llm_t *m, tokenizer_t *tk, int reps, int *calls)
+{
+    int toks[64];
+    int np = tok_encode(tk, "Once upon a time", 1, toks, 64);
+    if (np <= 0) {
+        np = 1;
+        toks[0] = 1;
+    }
+    for (int i = 0; i < np; i++) {
+        llm_forward_int8(m, toks[i], i, m->logits);
+    }
+    moe_reset_stats(m);
+    int64_t t0 = esp_timer_get_time();
+    for (int r = 0; r < reps; r++) {
+        for (int i = 0; i < np; i++) {
+            llm_forward_int8(m, toks[i], i, m->logits);
+        }
+    }
+    uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
+    if (calls) {
+        *calls = reps * np;
+    }
+    return us;
+}
+
+static void print_counts(const char *tag, const moe_stats_t *s)
+{
+    printf("%s route_calls=%u copies=%u copy_bytes=%u copy_us=%llu "
+           "counts=",
+           tag, (unsigned)s->route_calls, (unsigned)s->copies,
+           (unsigned)s->copy_bytes, (unsigned long long)s->copy_us);
+    for (int i = 0; i < s->experts; i++) {
+        printf("%s%u", i ? "," : "", (unsigned)s->route_count[i]);
+    }
+    printf("\n");
+    fflush(stdout);
+}
+
+static void moe_test(llm_t *m, tokenizer_t *tk)
+{
+    // Read the sidecar from the card. The arena is already live; the card is
+    // unmounted again before any forward pass.
+    sdmmc_card_t *card = NULL;
+    if (!sd_mount(&card)) {
+        printf("MOE_STAGE rc=io\n");
+        printf("MOE_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    moe_stage_t st;
+    int rc = moe_stage_file(MOE_PATH, &st);
+    esp_vfs_fat_sdcard_unmount("/sdcard", card);
+    if (rc != MOE_OK) {
+        printf("MOE_STAGE rc=%d (%s)\n", rc, moe_strerror(rc));
+        printf("MOE_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    printf("MOE_STAGE rc=0 bytes=%u experts=%u name=\"%s\" build=\"%s\" "
+           "model_crc=0x%08x\n",
+           (unsigned)st.file_bytes, st.experts, st.name, st.build,
+           (unsigned)st.model_sanity_crc);
+    printf("MOE_MODEL match=%d active_crc=0x%08x psram_free=%u\n",
+           st.model_sanity_crc == g_model.active.sanity_crc ? 1 : 0,
+           (unsigned)g_model.active.sanity_crc,
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    fflush(stdout);
+
+    // Baseline before the hook exists.
+    gen_result_t g;
+    run_gen(m, tk, "Once upon a time", GEN_TOKENS, true, &g);
+    uint32_t base_gen = ids_crc(&g);
+    int base_match = match_expected(&g) < 0 ? 1 : 0;
+    uint32_t base_logit = moe_logit_crc(m, tk);
+    int base_calls = 0;
+    uint32_t base_us = moe_time(m, tk, MOE_TEST_REPS, &base_calls);
+    printf("MOE_BASE gen_match=%d gen_crc=0x%08x logit_crc=0x%08x "
+           "us=%u forwards=%d\n",
+           base_match, (unsigned)base_gen, (unsigned)base_logit,
+           (unsigned)base_us, base_calls);
+    fflush(stdout);
+
+    rc = moe_bind(m, &st);
+    if (rc != MOE_OK) {
+        printf("MOE_BIND rc=%d (%s)\n", rc, moe_strerror(rc));
+        printf("MOE_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    uint32_t slice = (uint32_t)(2 * m->hidden_dim * m->w1.stride +
+                                m->dim * m->w2.stride +
+                                (2 * m->hidden_dim + m->dim) * 4);
+    printf("MOE_BIND rc=0 arena w1=%dx%d/%d w2=%dx%d/%d w3=%dx%d/%d "
+           "slice=%u all_layers=%u psram_free=%u\n",
+           m->w1.rows, m->w1.cols, m->w1.stride,
+           m->w2.rows, m->w2.cols, m->w2.stride,
+           m->w3.rows, m->w3.cols, m->w3.stride,
+           (unsigned)slice, (unsigned)(slice * m->n_layers),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    fflush(stdout);
+
+    moe_stats_t s;
+
+    // Expert 0 is the FFN of the booted model, so refilling it must be a
+    // byte-for-byte no-op on the logits.
+    moe_force_expert(m, 0);
+    moe_reset_stats(m);
+    uint32_t crc0 = moe_logit_crc(m, tk);
+    moe_get_stats(m, &s);
+    print_counts("MOE_FORCE0", &s);
+    printf("MOE_FORCE0 logit_crc=0x%08x same_as_base=%d\n",
+           (unsigned)crc0, crc0 == base_logit ? 1 : 0);
+    run_gen(m, tk, "Once upon a time", GEN_TOKENS, true, &g);
+    printf("MOE_FORCE0_GEN match=%d gen_crc=0x%08x same_as_base=%d\n",
+           match_expected(&g) < 0 ? 1 : 0, (unsigned)ids_crc(&g),
+           ids_crc(&g) == base_gen ? 1 : 0);
+    fflush(stdout);
+
+    // Expert 1 is a different FFN. The logits must change, and a second call
+    // with no refill must reproduce them exactly.
+    moe_force_expert(m, 1);
+    moe_reset_stats(m);
+    uint32_t crc1 = moe_logit_crc(m, tk);
+    moe_get_stats(m, &s);
+    print_counts("MOE_FORCE1", &s);
+    printf("MOE_FORCE1 logit_crc=0x%08x differs_from_base=%d\n",
+           (unsigned)crc1, crc1 != base_logit ? 1 : 0);
+    moe_reset_stats(m);
+    uint32_t crc1b = moe_logit_crc(m, tk);
+    moe_get_stats(m, &s);
+    print_counts("MOE_FORCE1_REPEAT", &s);
+    printf("MOE_FORCE1_REPEAT logit_crc=0x%08x deterministic=%d\n",
+           (unsigned)crc1b, crc1b == crc1 ? 1 : 0);
+    run_gen(m, tk, "Once upon a time", GEN_TOKENS, true, &g);
+    printf("MOE_FORCE1_GEN match=%d gen_crc=0x%08x differs=%d\n",
+           match_expected(&g) < 0 ? 1 : 0, (unsigned)ids_crc(&g),
+           ids_crc(&g) != base_gen ? 1 : 0);
+    fflush(stdout);
+
+    // Natural router.
+    moe_force_expert(m, -1);
+    moe_reset_stats(m);
+    run_gen(m, tk, "Once upon a time", GEN_TOKENS, true, &g);
+    moe_get_stats(m, &s);
+    print_counts("MOE_ROUTE", &s);
+    printf("MOE_ROUTE gen_match=%d gen_crc=0x%08x\n",
+           match_expected(&g) < 0 ? 1 : 0, (unsigned)ids_crc(&g));
+    fflush(stdout);
+
+    // Worst case: every layer refills on every forward.
+    moe_set_round_robin(m, true);
+    int rr_calls = 0;
+    uint32_t rr_us = moe_time(m, tk, MOE_TEST_REPS, &rr_calls);
+    moe_get_stats(m, &s);
+    print_counts("MOE_RR", &s);
+    printf("MOE_RR us=%u forwards=%d per_forward_us=%u\n",
+           (unsigned)rr_us, rr_calls, (unsigned)(rr_us / (uint32_t)rr_calls));
+    fflush(stdout);
+
+    // Steady-state pinned expert: router dot product, no refill.
+    moe_force_expert(m, 0);
+    int f0_calls = 0;
+    uint32_t f0_us = moe_time(m, tk, MOE_TEST_REPS, &f0_calls);
+    moe_get_stats(m, &s);
+    print_counts("MOE_FORCE0_TIME", &s);
+    printf("MOE_TIME base_us=%u force0_us=%u rr_us=%u forwards=%d "
+           "per_forward base=%u force0=%u rr=%u\n",
+           (unsigned)base_us, (unsigned)f0_us, (unsigned)rr_us, f0_calls,
+           (unsigned)(base_us / (uint32_t)base_calls),
+           (unsigned)(f0_us / (uint32_t)f0_calls),
+           (unsigned)(rr_us / (uint32_t)rr_calls));
+    fflush(stdout);
+
+    moe_unbind(m);
+    printf("MOE_PSRAM free=%u\n",
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    printf("MOE_DONE\n");
+    fflush(stdout);
+}
+#endif
+
 static volatile uint32_t g_bench_sink;
 
 static int64_t bench_cpu(const char *label, uint32_t iters)
@@ -1548,7 +1781,15 @@ static void bench_main(void)
     // Mode 1 starts from default.m8 regardless of what a previous run stored.
     model_pref_clear();
 #endif
-#if SWITCH_TEST || LIB_TEST
+#if MOE_TEST
+    // Provision the sidecar from the flash model partition, then boot the
+    // backbone normally. boot_model() unmounts the card before the arena is
+    // allocated; moe_test() remounts only to read the sidecar.
+    if (sd_ok) {
+        moe_provision();
+    }
+#endif
+#if SWITCH_TEST || LIB_TEST || MOE_TEST
     model_ctx_t *sw_ctx = &g_model;
 #else
     model_ctx_t *sw_ctx = NULL;
@@ -1569,6 +1810,19 @@ static void bench_main(void)
     if (m8) {
         printf("M8 bytes=%u prequantized\n", (unsigned)m8_bytes);
     }
+
+#if MOE_TEST
+    if (!m8 || !g_model.bound) {
+        printf("MOE_TEST requires an .m8 boot with a bound context\n");
+        printf("MOE_DONE\n");
+        fflush(stdout);
+        return;
+    }
+    moe_test(m, &tk);
+    printf("BENCH_DONE\n");
+    fflush(stdout);
+    return;
+#endif
 
 #if LIB_TEST
     if (!m8 || !g_model.bound) {

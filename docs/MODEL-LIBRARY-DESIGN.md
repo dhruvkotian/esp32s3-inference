@@ -36,7 +36,8 @@ than a reboot.
 | Fallback | Flash-partition model at `0x210000` |
 | Raw SD partition | Not in v1; only ~12% over FATFS `read()` |
 | Compression | Not in v1; int8 weights are likely near-incompressible |
-| Per-token expert loading | Out of scope; measured as non-viable |
+| Per-token expert loading from SD | Out of scope; ~4.4 MB/s makes it non-viable |
+| MoE experts | PSRAM-resident FFN sidecar, copied into the SRAM arena; §12 |
 
 The important separation is:
 
@@ -740,7 +741,8 @@ Still open:
 ## 10. Non-goals for v1
 
 - Different architectures at runtime. Different shapes require a reboot in v1.
-- Per-token expert loading.
+- Per-token expert loading from SD. The measured 4.4 MB/s read path cannot feed
+  a per-token slice. PSRAM-resident experts are a separate experiment (§12).
 - Executing the active model from PSRAM.
 - Raw SD partition or custom block device.
 - Compression.
@@ -776,5 +778,147 @@ The raw-sector path is not worth the complexity for v1: it buys about 12%
 about FAT cluster layout.
 
 The MoE path stays separate. The measurements say SD is a cold store; per-token
-expert fetches would need a trained model and a very high SRAM hit rate before
-they are worth prototyping.
+expert fetches from the card are not viable. PSRAM-resident FFN experts were
+measured separately (§12): a pinned expert is free after one refill, natural
+routing costs about 1.9x a plain forward at short context, and switching every
+layer on every token costs about 3.3x. Quality remains untested because there is
+still no trained MoE.
+
+## 12. Synthetic MoE prototype (2026-11-25)
+
+Status: mechanism and cost experiment. This host has no `torch`, no GPU and no
+training script, so there is no trained MoE and this section makes no quality or
+routing claim. The goals are narrower:
+
+1. prove that an FFN slice can be moved into the live arena byte-exactly;
+2. measure what per-token expert movement costs on this board;
+3. keep the work isolated from the frozen TECS artifact.
+
+### 12.1 What moves and what stays
+
+- **Stays**: token embedding, attention, RMS norms and the tokenizer come from
+  the active `.m8` model.
+- **Moves**: each expert is only the FFN (`w1`, `w2`, `w3`) for all layers,
+  stored in PSRAM in the same int8 row-strided form as the arena.
+- **Hook**: `llm_forward_int8()` calls `moe_hook(m, layer, xb)` immediately
+  after the FFN RMSNorm, before `quant_vec()` and `mm_q_pre()`. The int8 path
+  only; the fp32 reference path is untouched.
+- **Refill**: when the routed expert for a layer differs from the one resident,
+  six `memcpy()` calls replace that layer's row range in `m->w1/w2/w3` and
+  their scale rows. Shapes, pointers and row strides never change.
+- **Arena**: still 274,656 B internal SRAM. Nothing is allocated inside a
+  forward pass.
+
+Because a layer is refilled before its matvecs, the router reads exactly the
+normalized input the FFN is about to use.
+
+### 12.2 Sidecar format
+
+Little-endian, 4 KiB header, magic `MOE1`. It follows the `.m8` conventions:
+header CRC32, payload SHA-256, explicit sizes and offsets.
+
+| Offset | Field |
+|---:|---|
+| 0 | magic `MOE1` |
+| 4 | `u16` version (1), `u16` header bytes (4096) |
+| 8 | `u32` file bytes, `u32` payload bytes |
+| 16 | `u32` flags (bit0 router f32, bit1 synthetic) |
+| 20 | `u32` header CRC32 (field zeroed during the check) |
+| 24 | `u8[32]` payload SHA-256 |
+| 56 | `u16` dim, hidden, layers, experts |
+| 64 | `u8` row align (16), 3 reserved bytes |
+| 68 | `u32` sanity CRC of expert 0's source model |
+| 72 | `u32` router offset, `u32` router bytes |
+| 80 | `u32` expert block bytes, `u32` expert block offset |
+| 88 | six `u32` pairs: `w1q`, `w1s`, `w2q`, `w2s`, `w3q`, `w3s` offset/bytes |
+| 136 | `char[32]` name, `char[32]` build id |
+
+The router is float32 `[layer][expert][dim]`. Each expert block contains whole
+tensors (`w1q`, `w2q`, `w3q`, then the three scale arrays), so a per-layer
+update is a row-range `memcpy()` per tensor.
+
+Test fixture (`tools/make_moe_sidecar.py`):
+
+```text
+dim=64 hidden=172 layers=5 experts=2
+router        2,560 B
+expert block 174,560 B  (w1q 55,040 + w2q 56,320 + w3q 55,040
+                         + scales 8,160)
+file          355,776 B  sha256 55405dd3...
+```
+
+Expert 0 is the FFN of `default.m8`; expert 1 is the FFN of the synthetic
+`alt.m8` (uniform scale 1.03). Expert blocks are extracted from packed `.m8`
+files, not re-quantized, so the bytes match the arena exactly. Those blobs come
+from the existing flow: A is the published `stories260k-q8.m8`, B is
+`make_model_variant.py --scale 1.03` packed and fingerprinted as in section 9.
+
+```bash
+tools/make_moe_sidecar.py \
+    --blob build/stories260k-q8.m8 --blob /tmp/alt.m8 \
+    --out moe.bin --seed 2026 --check
+```
+
+### 12.3 Device results
+
+`MOE_TEST=1`. The sidecar was provisioned from the flash model partition to
+`/sdcard/models/moe.bin`, the backbone was booted normally, the sidecar was read
+from SD and the card was unmounted before inference. Two full runs produced
+identical CRCs, route counts and copy counts
+(`logs/MOE-PROTOTYPE-2026-11-25.log`).
+
+| Test | Result |
+|---|---|
+| Sidecar from SD | 355,776 B, 2 experts, header CRC and SHA-256 pass |
+| Expert 0 forced | logit CRC `0x4a4a3c07` **equals** the no-MoE baseline |
+| Expert 0 generation | 12/12 golden ids, same id CRC as baseline |
+| Expert 1 forced | logit CRC `0x2e601e3d`, differs from baseline |
+| Expert 1 repeat | 0 refills, same CRC, deterministic |
+| Natural router | 56/29 expert calls over 85 layer-calls; 34 refills |
+| Round-robin | 200 refills over 200 layer-calls (every layer, every token) |
+| PSRAM after unbind | 7,056,228 B free, i.e. back to the pre-stage value |
+
+Per-forward cost, replaying the 5-token prompt from position 0 (40 measured
+forwards per case):
+
+| Case | us/forward | vs base | Refills/forward |
+|---|---:|---:|---:|
+| No MoE | 1,266 | 1.00x | 0 |
+| Pinned expert (router runs) | 1,266 | 1.00x | 0 |
+| Natural router | ~2,430 (est.) | ~1.9x | 2.0 |
+| Round-robin, every layer switches | 4,222 | 3.33x | 5.0 |
+
+One refill moves 34,912 B (one layer: w1+w3+w2 plus scales) in about 588 us,
+i.e. 58-60 MB/s out of PSRAM. A full five-layer switch costs 174,560 B and
+about 2.95 ms per token.
+
+### 12.4 Interpretation
+
+- The refill path is exact: forcing expert 0, which is the booted model's own
+  FFN, reproduces the baseline logits bit for bit. That validates the sidecar
+  offsets, strides and copy ranges.
+- A pinned expert costs only the router dot products: 0-2 us per forward. The
+  one-time refill is 2.95 ms.
+- Per-token routing is expensive at short context: 1.9x for this synthetic
+  router and 3.3x in the worst case. At longer contexts the compute component
+  grows, so the relative penalty falls, but the ~0.59 ms per refilled layer does
+  not.
+- Expert 1's greedy continuation coincides with expert 0's because the source
+  variant is a uniform 1.03 scaling of the whole checkpoint. The logit CRC still
+  distinguishes them; the id CRC is not a useful discriminator for this fixture.
+
+Limits:
+
+- Experts and router are synthetic. No load-balancing, perplexity or quality
+  claim can be made.
+- Two experts, top-1 routing, one expert resident per layer. Top-2 or larger
+  expert counts need different copy and compute accounting.
+- The sidecar stores whole expert tensors, 174,560 B each. Four experts would be
+  about 698 KiB + router, which still fits, but it competes with the three-blob
+  `.m8` cache for PSRAM.
+- Per-token expert paging from SD remains out of scope; the measured card read
+  rate is far too low.
+
+The next useful refinement is session-level per-layer pinning: route once,
+pay one 2.95 ms refill, then run without further copies. That is a trained-model
+experiment, not a firmware one.

@@ -1281,6 +1281,11 @@ static int forward_impl(llm_t *m, int token, int pos, float *logits, bool q8)
         PROF(3);
 
         rmsnorm(m->xb, m->x, m->f_rms_ffn + (size_t)l * dim, dim, q8);
+        if (q8 && m->moe_hook) {
+            // MoE prototype: route this token's FFN and, if the selected
+            // expert changed, refill this layer's w1/w2/w3 slice in place.
+            m->moe_hook(m, l, m->xb);
+        }
         if (q8) {
             float xs;
             quant_vec(m->xb, m->qx, dim, m->stride_max, &xs);

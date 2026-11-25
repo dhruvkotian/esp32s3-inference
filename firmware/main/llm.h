@@ -14,7 +14,7 @@ typedef struct {
     int stride;
 } qmat_t;
 
-typedef struct {
+typedef struct llm_t {
     // model config (legacy llama2.c header)
     int dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len;
     int kv_dim, head_size, kv_mul;
@@ -84,6 +84,13 @@ typedef struct {
     // than the vector MACs.
     float *rope_cos, *rope_sin;
     int rope_stride;
+
+    // Optional per-layer FFN hook used by the MoE prototype. Called after the
+    // FFN RMSNorm and before the int8 w1/w3 matvecs, with the normalized
+    // input. The hook may replace the w1/w2/w3 row range for this layer.
+    // moe_bind() installs it; moe_unbind() clears both fields.
+    void (*moe_hook)(struct llm_t *m, int layer, const float *x);
+    void *moe;
 
     // Per-section timing, accumulated over int8 forward passes only.
     uint64_t prof[8];

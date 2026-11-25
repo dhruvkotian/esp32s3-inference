@@ -1,0 +1,65 @@
+# Synthetic MoE prototype: FFN-only experts, PSRAM -> SRAM per-layer refill
+# Board: ESP32-S3-CAM, 8 MB octal PSRAM, 16 MB flash, SD 40 MHz 1-bit
+# Backbone: /sdcard/models/default.m8 (stories260k-q8, crc 0xb2f5d2bd)
+# Sidecar: /sdcard/models/moe.bin, 355,776 B, sha256 55405dd3fbaf1ce7
+#   expert 0 = FFN of default.m8 (A), expert 1 = FFN of alt.m8 (B, synthetic
+#   scale=1.03), router = synthetic N(0, 0.05), seed 2026
+# Build: MOE_TEST=1. Provisioned from the flash model partition, then booted
+# A normally. The sidecar was read from SD, then the card was unmounted.
+#
+# Two full runs on the same build; CRCs, route counts and copy counts are
+# identical. Timings vary by <0.1%.
+
+MOE_PROV rc=0 bytes=355776 experts=2 path=/sdcard/models/moe.bin
+I (2272) llms3: boot: using NVS last model default.m8
+I (2429) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2452) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2453) llms3: model source: .m8 blob
+MOE_STAGE rc=0 bytes=355776 experts=2 name="synthetic-moe-2" build="moe-tool 1 seed=2026" model_crc=0xb2f5d2bd
+MOE_MODEL match=1 active_crc=0xb2f5d2bd psram_free=6695776
+MOE_BASE gen_match=1 gen_crc=0xe5ead011 logit_crc=0x4a4a3c07 us=50656 forwards=40
+MOE_BIND rc=0 arena w1=860x64/64 w2=320x172/176 w3=860x64/64 slice=34912 all_layers=174560 psram_free=6695776
+MOE_FORCE0 route_calls=5 copies=5 copy_bytes=174560 copy_us=2985 counts=5,0
+MOE_FORCE0 logit_crc=0x4a4a3c07 same_as_base=1
+MOE_FORCE0_GEN match=1 gen_crc=0xe5ead011 same_as_base=1
+MOE_FORCE1 route_calls=5 copies=5 copy_bytes=174560 copy_us=2933 counts=0,5
+MOE_FORCE1 logit_crc=0x2e601e3d differs_from_base=1
+MOE_FORCE1_REPEAT route_calls=5 copies=0 copy_bytes=0 copy_us=0 counts=0,5
+MOE_FORCE1_REPEAT logit_crc=0x2e601e3d deterministic=1
+MOE_FORCE1_GEN match=1 gen_crc=0xe5ead011 differs=0
+MOE_ROUTE route_calls=85 copies=34 copy_bytes=1187008 copy_us=19804 counts=56,29
+MOE_ROUTE gen_match=1 gen_crc=0xe5ead011
+MOE_RR route_calls=200 copies=200 copy_bytes=6982400 copy_us=115851 counts=100,100
+MOE_RR us=168884 forwards=40 per_forward_us=4222
+MOE_FORCE0_TIME route_calls=200 copies=0 copy_bytes=0 copy_us=0 counts=200,0
+MOE_TIME base_us=50656 force0_us=50753 rr_us=168884 forwards=40 per_forward base=1266 force0=1268 rr=4222
+MOE_PSRAM free=7056228
+MOE_DONE
+
+# ---- repeat run (determinism check) --------------------------------
+
+MOE_PROV rc=0 bytes=355776 experts=2 path=/sdcard/models/moe.bin
+I (2316) llms3: boot: using NVS last model default.m8
+I (2473) llm: int8 weights placed: 260608 B internal SRAM, 0 B PSRAM (slab no)
+I (2497) model: sanity ok: top32 crc=0xb2f5d2bd greedy=432,383,286,...
+I (2497) llms3: model source: .m8 blob
+MOE_STAGE rc=0 bytes=355776 experts=2 name="synthetic-moe-2" build="moe-tool 1 seed=2026" model_crc=0xb2f5d2bd
+MOE_MODEL match=1 active_crc=0xb2f5d2bd psram_free=6695776
+MOE_BASE gen_match=1 gen_crc=0xe5ead011 logit_crc=0x4a4a3c07 us=50666 forwards=40
+MOE_BIND rc=0 arena w1=860x64/64 w2=320x172/176 w3=860x64/64 slice=34912 all_layers=174560 psram_free=6695776
+MOE_FORCE0 route_calls=5 copies=5 copy_bytes=174560 copy_us=2984 counts=5,0
+MOE_FORCE0 logit_crc=0x4a4a3c07 same_as_base=1
+MOE_FORCE0_GEN match=1 gen_crc=0xe5ead011 same_as_base=1
+MOE_FORCE1 route_calls=5 copies=5 copy_bytes=174560 copy_us=2940 counts=0,5
+MOE_FORCE1 logit_crc=0x2e601e3d differs_from_base=1
+MOE_FORCE1_REPEAT route_calls=5 copies=0 copy_bytes=0 copy_us=0 counts=0,5
+MOE_FORCE1_REPEAT logit_crc=0x2e601e3d deterministic=1
+MOE_FORCE1_GEN match=1 gen_crc=0xe5ead011 differs=0
+MOE_ROUTE route_calls=85 copies=34 copy_bytes=1187008 copy_us=19794 counts=56,29
+MOE_ROUTE gen_match=1 gen_crc=0xe5ead011
+MOE_RR route_calls=200 copies=200 copy_bytes=6982400 copy_us=115864 counts=100,100
+MOE_RR us=168891 forwards=40 per_forward_us=4222
+MOE_FORCE0_TIME route_calls=200 copies=0 copy_bytes=0 copy_us=0 counts=200,0
+MOE_TIME base_us=50666 force0_us=50674 rr_us=168891 forwards=40 per_forward base=1266 force0=1266 rr=4222
+MOE_PSRAM free=7056228
+MOE_DONE
