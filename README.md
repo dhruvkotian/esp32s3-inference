@@ -1,178 +1,133 @@
-# esp32s3-int8-transformer
+# ESP32-S3 INT8 Transformer Inference
 
-Artifact for the paper **"Bytes, Not FLOPs: INT8 KV Caching and 128-bit PIE
-Attention on ESP32-S3"**.
+Firmware, kernels and measurement tooling for running a small int8 transformer
+entirely on an ESP32-S3, plus a model runtime that loads and switches models
+from an SD card.
 
-This repository is the experiment tree behind the paper. It runs a
-260K-parameter decoder-only transformer at batch size one on an ESP32-S3, with
-the key/value cache stored as int8 in external PSRAM and attention mapped onto
-the 128-bit integer SIMD unit. At 512-token context the final build sustains
-166.6 decode forwards/s, equivalent to 168.25 sampled tokens/s, 2.898x the
-same-tree fp32 single-core baseline. The 512-sample harness performs 507 decode
-forwards, because the last five samples reuse the final logits.
+The research baseline (`v1.2.0`) is the exact code and configuration behind the
+TECS experimental claims: an int8 KV cache in PSRAM and 128-bit PIE attention at
+512-token context. The runtime release (`v1.3.0`) adds the `.m8` model library,
+a PSRAM cache, NVS boot selection and a synthetic MoE prototype. **`v1.3.0` was
+not evaluated in the submitted manuscript.**
 
-Every number in the paper comes from a raw UART capture in `logs/`. The mapping
-from paper table rows to capture files is in [`logs/BUILD-MAP.md`](logs/BUILD-MAP.md).
-Nothing in the figure pipeline is typed in by hand: `tools/make_figures.py`
-fails if a required measurement is missing from a log.
+## Platform
 
-## Hardware
-
-| Item | Value |
+| | |
 |---|---|
-| Board | ESP32-S3-CAM generic carrier; vendor and revision not recorded |
-| MCU | ESP32-S3, dual-core Xtensa LX7, 240 MHz, rev 0.2, efuse v1.3 |
-| Memory | 16 MB Boya flash, 8 MB AP Memory octal PSRAM (gen 3, 64 Mbit), 80 MHz |
+| SoC | ESP32-S3, dual-core Xtensa LX7, 240 MHz, silicon v0.2 |
 | Internal SRAM | 512 KB |
-| Data cache | 64 KB, 8-way, 32 B lines (32 KB variants in `config/`) |
-| Host link | CH343 USB-UART bridge on `/dev/ttyACM0`, 115200 baud |
-| Model storage | microSD, `/sdcard/stories260K.bin` and `/sdcard/tok512.bin` |
+| PSRAM | 8 MB octal, 80 MHz |
+| Flash | 16 MB |
+| Model | 260K parameters, 512-token vocabulary, 512-token context |
+| Toolchain | ESP-IDF v5.4.4 |
 
-See [`docs/HARDWARE.md`](docs/HARDWARE.md) for the memory budget and the
-measured PSRAM rates.
+## Releases
+
+| Tag | Role | Headline |
+|---|---|---|
+| `v1.2.0` | Research baseline | 166.6 decode forwards/s at 512 context; 2.898x the same-tree fp32 single-core baseline; 245,760 B int8 KV payload and scales |
+| `v1.3.0` | Runtime evolution | `.m8` model library, three-slot PSRAM cache, NVS selection, synthetic MoE sidecar |
+
+`v1.2.0` is the release that corresponds to the research results. `v1.3.0`
+builds on it without changing the evaluated kernels or the measured claims.
 
 ## Layout
 
 ```
-firmware/      ESP-IDF project: attention kernels, int8 KV cache, dual core
-config/        sdkconfig snapshots for the 32 KB and 64 KB cache variants
-model/         stories260K.bin and tok512.bin, with provenance
-data/          expected.json, the reference logits for the accuracy harness
-logs/          raw UART captures, per-build summaries, figures, BUILD-MAP.md
-tools/         capture, analysis, figure generation, cache configuration
-micro/         separate app: ESP-DSP against the same-tree dot kernels
-docs/          hardware notes, reproduction, and project records
+firmware/   ESP-IDF project: attention kernels, int8 KV cache, model runtime, tokenizer
+micro/      standalone microbenchmark and ESP-DSP comparison
+tools/      analysis, capture, packing, verification, reference and figure scripts
+config/     sdkconfig snapshots for the 32 KB and 64 KB D-cache variants
+data/       expected outputs and reference metadata
+logs/       raw benchmark captures and runtime test logs
+model/      model provenance, tokenizer and licences
+docs/       hardware, reproduction, model library and SD benchmark documentation
 ```
 
 ## Quick start
 
-The paper's primary configuration is the 64 KB D-cache build. From a fresh
-extraction, the tested sequence is:
+The research configuration is the 64 KB D-cache build:
 
 ```bash
 . $IDF_PATH/export.sh
 cd firmware
 idf.py set-target esp32s3
 cp ../config/sdkconfig.64kb sdkconfig
-idf.py fullclean
 idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-The default configuration builds the 32 KB D-cache variant. To reproduce the
-paper's primary 64 KB configuration, replace the generated sdkconfig with
-config/sdkconfig.64kb before building, as shown above. The copy overwrites the
-sdkconfig that `set-target` generated, and `fullclean` removes any previous
-build tree.
+The 32 KB build is the cache-sweep baseline, not the headline configuration.
 
-The 32 KB variant is the baseline used in the cache sweep, not the build behind
-the 166.6 decode forwards/s headline. To build it, omit the `cp` line and
-continue from the generated `sdkconfig`:
+The model runtime tools build and verify `.m8` blobs:
 
 ```bash
-. $IDF_PATH/export.sh
-cd firmware
-idf.py set-target esp32s3
-idf.py fullclean
-idf.py build
+python3 tools/pack_model_m8.py --help
+python3 tools/verify_m8.py --help
+python3 tools/make_moe_sidecar.py --help
 ```
 
-With ESP-IDF v5.4.4, the 64 KB sequence above reproduces the released image:
-`.flash.text`, `.flash.rodata`, `.dram0.data` and `.iram0.text` are
-byte-identical, and only the build timestamp and image digest in the ESP-IDF
-app descriptor differ.
+## Results at a glance
 
-Flash the application only. The bootloader, partition table and the model
-partition are not touched:
+All values are measured on the board above; the raw captures are in `logs/`.
 
-```bash
-esptool.py --port /dev/ttyACM0 --baud 921600 --chip esp32s3 write_flash \
-  --flash_mode dio --flash_freq 80m --flash_size 16MB \
-  0x10000 build/llm_s3_test.bin
-```
+| Metric | Value |
+|---|---|
+| Decode forwards/s at 512 context | 166.6 |
+| Sampled tokens/s, same harness | 168.25 |
+| Speed-up vs fp32 single core | 2.898x |
+| Speed-up vs fp32 dual core | 2.109x |
+| Decode forward time | 6.00 ms |
+| int8 KV payload and scales (PSRAM) | 245,760 B |
+| Complete hybrid cache incl. SRAM hot window | 266,240 B |
+| Short-context rate, 16-position hot window | 615 tok/s |
+| Sustained rate over 512 tokens | 46.0 tok/s |
+| Model library, cold select | 377.6 ms |
+| Model library, cached select | 29.4 ms |
 
-Then capture one run:
+Accuracy: top-1 predictions match the FP32 reference at all nine evaluation
+depths; combined relative logit RMSE is 1.08% to 4.56%.
 
-```bash
-python3 tools/capture_until.py /dev/ttyACM0 240 logs/bench_mine.log BENCH_DONE
-```
+## Reproducing the results
 
-The full procedure, including the build switches for each experiment, is in
-[`docs/REPRODUCE.md`](docs/REPRODUCE.md).
-
-## Vendor comparison
-
-`micro/` is a separate application that links ESP-DSP v1.8.2 and times
-`dsps_dp_s8` against `llm_dot16_s8`, `llm_dot16x4_s8` and `llm_dot_s8` on
-internal-SRAM buffers. It exists to answer the obvious question: why not use
-the vendor primitive? The answer is in [`logs/MICRO-RESULT.md`](logs/MICRO-RESULT.md).
-On the score shape the batched kernel is 2.063x faster than four vendor calls.
-On the long dot, ESP-DSP is 2.16x faster per block than the original two-load
-kernel (4.13 against 8.91 cycles). v1.2.0 adopts the same fused load in
-`llm_dot_s8`, which brings it to 4.10 cycles per block and closes the gap: the
-final kernel is equivalent to ESP-DSP on this workload, not slower than it.
-An interleaved A/B measured 166.74 to 168.25 sampled tokens/s (+0.9%), or
-165.1 to 166.6 decode forwards/s, with byte-identical logits. The rest of the
-scan did not move, because the V phase is memory-bound in situ.
-
-## Regenerating the figures
+The logs are the raw UART captures the results are computed from. The analysis
+scripts recompute the tables and figures from those logs:
 
 ```bash
+python3 tools/analyze_bench.py
 python3 tools/make_figures.py
+python3 tools/micro_report.py
 ```
 
-This reads `logs/` and writes `logs/figs/`.
-
-## Verifying the release
+Verify the tree against the release manifest:
 
 ```bash
 sha256sum -c MANIFEST.sha256
 ```
 
-The manifest covers every file in the release except itself. Regenerating a
-figure will change the corresponding hash; that is expected, because PDF
-producers embed timestamps.
-
-## Release packages
-
-| Package | Location | Purpose |
-|---|---|---|
-| Software artifact | this repository at the release tag | Firmware, microbenchmark, logs, figures, manifest and instructions |
-
-The manuscript is maintained separately and is not part of this software release.
-
-## What this release does and does not reproduce
-
-It reproduces the measurements: the logs are the captures the paper reports,
-and the analysis scripts recompute every table and figure from them.
-
-It does not reproduce the hardware by itself. Re-running the firmware needs an
-ESP32-S3 with octal PSRAM, a microSD card, and the same ESP-IDF version
-(v5.4.4). Throughput depends on the cache size and line size, so the cache
+Re-running the firmware needs an ESP32-S3 with octal PSRAM, a microSD card and
+ESP-IDF v5.4.4. Throughput depends on cache size and line size, so the cache
 configuration is part of the experiment, not an implementation detail.
 
-## Licensing
+## Scope and limitations
 
-- Firmware, analysis scripts and build configuration: **GPL-3.0-only**, see
-  [`LICENSE`](LICENSE).
-- Manuscript source, figures and the text of this artifact: **CC BY 4.0**, see
-  [`LICENSE-PAPER`](LICENSE-PAPER).
-- `model/stories260K.bin` and `model/tok512.bin` are unmodified copies of
-  Andrej Karpathy's tinyllamas 260K model and tokenizer, distributed under the
-  **MIT licence**. The upstream notice is in [`model/LICENSE`](model/LICENSE);
-  source, hashes, credit and acquisition instructions are in
-  [`model/PROVENANCE.md`](model/PROVENANCE.md).
+- The 260K checkpoint writes simple children's-story English. It is a reflex-tier
+  runtime, not an assistant.
+- 615 tok/s is the short-context rate. Sustained over 512 tokens the rate is
+  46.0 tok/s.
+- Energy per token was not measured; no energy claim is made.
+- Runtime model switching requires identical tensor shapes and tokenizer.
+- The MoE prototype is synthetic: two experts, no training, no quality or
+  routing claim.
+- Per-token expert paging from SD is not viable at the measured card rate.
 
-The three licences are deliberately separate. GPL-3.0-only covers the
-firmware and tools; it does not cover the paper or the model files. The model
-files remain MIT and are not relicensed as GPL.
+## Citation
 
-## Citing
+See `CITATION.cff`.
 
-See [`CITATION.cff`](CITATION.cff).
+## Licence
 
-## Scope
-
-One board, one model, one context length, one memory configuration. The paper
-makes no energy claim and no state-of-the-art claim. The comparison is against
-same-tree baselines, which is the right comparison for attribution but not a
-claim about the best possible implementation.
+- Firmware, tools and build configuration: **GPL-3.0-only**, see `LICENSE`.
+- Bundled 260K model and tokenizer: **MIT**, see `model/LICENSE` and
+  `model/PROVENANCE.md`.
+- Documentation and figures: **CC BY 4.0**, see `LICENSE-PAPER`.

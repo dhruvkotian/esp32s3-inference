@@ -1,12 +1,12 @@
 # v1.3.0 — Model library, PSRAM cache, and a measured MoE prototype
 
-Base: `v1.2.0` (the characterisation artifact). This release adds the model
-runtime and a synthetic expert prototype. The paper is unchanged except for the
-manuscript title and abstract, which now match the ACM TECS submission; no other
-paper content, figures, or built PDFs are modified.
+Base: `v1.2.0` (the research baseline). This release adds the model runtime and
+a synthetic expert prototype. It does not change the evaluated kernels or the
+measurements behind the TECS experimental claims.
 
-This is a **local** release. It is not published to GitHub. The ACM TECS
-submission is **not** part of this repository or this release.
+`v1.3.0` was **not** evaluated in the submitted manuscript. The manuscript, its
+production files and submission records are maintained separately and are not
+part of this repository.
 
 ## Added
 
@@ -26,7 +26,7 @@ submission is **not** part of this repository or this release.
   existing internal-SRAM arena. Hook runs after the FFN RMSNorm in the int8
   path only.
 - **Tools.** `pack_model_m8.py`, `verify_m8.py`, `make_model_variant.py`,
-  `make_moe_sidecar.py`, `verify_submission_pdf.py`.
+  `make_moe_sidecar.py`, `logit_dump.py`, `quant_ref.c`.
 - **Docs and logs.** `docs/MODEL-LIBRARY-DESIGN.md`, `logs/MOE-*`,
   `logs/SD-BENCH-*`.
 

@@ -792,7 +792,7 @@ routing claim. The goals are narrower:
 
 1. prove that an FFN slice can be moved into the live arena byte-exactly;
 2. measure what per-token expert movement costs on this board;
-3. keep the work isolated from the frozen TECS artifact.
+3. keep the work isolated from the frozen `v1.2.0` research artifact.
 
 ### 12.1 What moves and what stays
 
