@@ -24,6 +24,10 @@ Documentation and metadata corrections; no firmware change.
   and are not in the v1.2.0 captures.
 - `CITATION.cff`: current repository name and URL, the full university name, and
   a licence statement that matches `LICENSE-PAPER`.
+- README and changelog label `2.898x` as a sampled-rate ratio against the
+  58.06 tok/s baseline, so it is not read as applying to 166.6 forwards/s.
+- MoE rows are labelled as per-forward latency ratios, and the natural-router
+  figure is marked as an estimate.
 - `CHANGELOG.md`: scan bandwidth corrected to 51.7 MB/s.
 
 ## v1.3.0 — 2026-11-25
@@ -55,9 +59,9 @@ Runtime evolution. Not evaluated in the submitted manuscript.
 | Cold model select | 377.6 ms |
 | Cached select | 29.4 / 30.0 ms |
 | LRU, 8 selects | 8/8 correct, 3 slots used |
-| MoE pinned expert | 1.00x a plain forward |
-| MoE natural synthetic router | ~1.9x |
-| MoE round-robin worst case | 3.33x |
+| MoE pinned expert | 1.00x latency (no penalty) |
+| MoE natural synthetic router | ~1.9x latency (~2,430 vs 1,266 us, estimated) |
+| MoE round-robin worst case | 3.33x latency |
 | Expert refill | 58–60 MB/s, ~588 us per layer |
 
 Forcing the booted model's own FFN reproduces the baseline logits bit for bit.
@@ -91,8 +95,8 @@ experimental claims.
 |---|---|
 | Decode forwards/s at 512 context | 166.6 |
 | Sampled tokens/s, same harness | 168.25 |
-| Speed-up vs fp32 single core | 2.898x |
-| Speed-up vs fp32 dual core | 2.109x |
+| Sampled-rate speed-up vs fp32 single core (58.06 tok/s) | 2.898x |
+| Sampled-rate speed-up vs fp32 dual core (79.77 tok/s) | 2.109x |
 | Decode forward time | 6.00 ms |
 | Scan traffic | 238,080 B/token at 51.7 MB/s |
 

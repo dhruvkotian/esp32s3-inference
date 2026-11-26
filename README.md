@@ -27,7 +27,7 @@ not evaluated in the submitted manuscript.**
 
 | Tag | Role | Headline |
 |---|---|---|
-| `v1.2.0` | Research baseline | 166.6 decode forwards/s at 512 context; 2.898x the same-tree fp32 single-core baseline; 245,760 B int8 KV payload and scales |
+| `v1.2.0` | Research baseline | 166.6 decode forwards/s (168.25 sampled tokens/s) at 512 context; 2.898x sampled-rate improvement over the 58.06 tok/s fp32 single-core baseline; 245,760 B int8 KV payload and scales |
 | `v1.3.0` | Runtime evolution | `.m8` model library, three-slot PSRAM cache, NVS selection, synthetic MoE sidecar |
 
 `v1.2.0` is the release that corresponds to the research results. `v1.3.0`
@@ -89,8 +89,8 @@ cell. These are the numbers behind the TECS experimental claims.
 |---|---|
 | Decode forwards/s at 512 context | 166.6 |
 | Sampled tokens/s, same harness | 168.25 |
-| Speed-up vs fp32 single core | 2.898x |
-| Speed-up vs fp32 dual core | 2.109x |
+| Sampled-rate speed-up vs fp32 single core (58.06 tok/s) | 2.898x |
+| Sampled-rate speed-up vs fp32 dual core (79.77 tok/s) | 2.109x |
 | Decode forward time | 6.00 ms |
 | int8 KV payload and scales (PSRAM) | 245,760 B |
 | Complete hybrid cache incl. SRAM hot window | 266,240 B |
@@ -101,6 +101,10 @@ cell. These are the numbers behind the TECS experimental claims.
 Accuracy: top-1 predictions match the fp32 reference at all nine evaluation
 depths; combined relative logit RMSE is 1.08% to 4.56%, and cosine similarity is
 at least 0.9995052.
+
+Six independent captures of the final build span 168.24-168.28 sampled tokens/s
+(166.60-166.64 decode forwards/s). 168.25 is the tabulated value, not a selected
+best run.
 
 ### v1.3.0 — model runtime measurements
 
@@ -114,10 +118,14 @@ evaluated kernels.**
 | Cold model select (SD -> PSRAM -> SRAM) | 377.6 ms |
 | Cached model select | 29.4 / 30.0 ms |
 | LRU cache, eight selects | 8/8 correct, 3 slots |
-| MoE, pinned expert | 1.00x a plain forward |
-| MoE, natural synthetic router | ~1.9x |
-| MoE, round-robin worst case | 3.33x (4,222 vs 1,266 us) |
+| MoE, pinned expert | 1.00x latency (no penalty) |
+| MoE, natural synthetic router | ~1.9x latency (~2,430 vs 1,266 us, estimated) |
+| MoE, round-robin worst case | 3.33x latency (4,222 vs 1,266 us) |
 | Expert refill from PSRAM | 58-60 MB/s |
+
+MoE rows are per-forward latency relative to the same build with no MoE; a
+larger number is slower. The natural-router figure is an estimate, and the
+fixture is synthetic: no quality or routing claim is made.
 
 ## Reproducing the results
 

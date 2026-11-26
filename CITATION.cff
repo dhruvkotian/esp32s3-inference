@@ -1,17 +1,18 @@
 cff-version: 1.2.0
 message: "If you use this artifact, cite the paper and this release."
-title: "esp32s3-inference: INT8 KV-cache and attention kernels for the ESP32-S3"
+title: "esp32s3-inference: Memory-aware transformer inference and embedded model runtime for ESP32-S3"
 abstract: >-
   Firmware, raw measurement logs and analysis scripts for a 260K-parameter
   decoder-only transformer running at batch size one on an ESP32-S3, with the
   key/value cache stored as int8 in external PSRAM and attention mapped onto
   the 128-bit integer SIMD unit. At 512-token context the final build sustains
-  166.6 decode forwards/s, equivalent to 168.25 sampled tokens/s, 2.898x the
-  same-tree fp32 single-core baseline. The 512-sample harness performs 507
-  decode forwards. Firmware and
-  tools are GPL-3.0-only; the bundled 260K model and tokenizer are MIT;
-  documentation and figures are CC BY 4.0. The manuscript is not part of this
-  repository.
+  166.6 decode forwards/s, equivalent to 168.25 sampled tokens/s. That is
+  2.898x the sampled-token rate of the same-tree fp32 single-core baseline
+  (58.06 sampled tokens/s). The 512-sample harness performs 507 decode
+  forwards. Firmware, tools and build configuration are GPL-3.0-only. The
+  bundled model and tokenizer retain their upstream MIT licence. Documentation
+  and figures are CC BY 4.0. The submitted manuscript and production files are
+  not included in this repository.
 type: software
 authors:
   - family-names: Kotian
