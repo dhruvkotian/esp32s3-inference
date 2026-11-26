@@ -4,9 +4,10 @@ All dates are UTC. This repository is the public software tree; the manuscript,
 its production files and submission records are maintained separately and are
 not part of any commit here.
 
-## Unreleased
+## v1.3.1 — 2026-11-26
 
-Documentation and metadata corrections; no firmware change.
+Metadata and documentation patch. Firmware is byte-identical to `v1.3.0`; no
+kernel, log, model or configuration file changes.
 
 ### Added
 

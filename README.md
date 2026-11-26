@@ -29,9 +29,12 @@ not evaluated in the submitted manuscript.**
 |---|---|---|
 | `v1.2.0` | Research baseline | 166.6 decode forwards/s (168.25 sampled tokens/s) at 512 context; 2.898x sampled-rate improvement over the 58.06 tok/s fp32 single-core baseline; 245,760 B int8 KV payload and scales |
 | `v1.3.0` | Runtime evolution | `.m8` model library, three-slot PSRAM cache, NVS selection, synthetic MoE sidecar |
+| `v1.3.1` | Metadata patch | Corrected citation metadata, provenance document and explicit rate labels; firmware byte-identical to `v1.3.0` |
 
 `v1.2.0` is the release that corresponds to the research results. `v1.3.0`
 builds on it without changing the evaluated kernels or the measured claims.
+`v1.3.1` changes documentation and metadata only; it is the release archived by
+Zenodo for a DOI.
 
 This repository is a filtered export of a private research tree, so the commit
 IDs are not the original ones. The tag mapping, the files that were reworded and
