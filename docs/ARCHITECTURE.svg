@@ -14,7 +14,7 @@
   <text x="62" y="172" fill="#8aa3b2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">read 4.31 MB/s · mount 82–88 ms</text>
   <rect x="700" y="114" width="236" height="58" rx="4" fill="#0d1b2a" stroke="#2a4a5e"/>
   <text x="716" y="136" fill="#7fd7e8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12">NVS: last selected basename</text>
-  <text x="716" y="156" fill="#8aa3b2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">boot order: last → default → flash</text>
+  <text x="716" y="156" fill="#8aa3b2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">boot: last → default → flash</text>
 
   <!-- arrow SD -> PSRAM -->
   <line x1="500" y1="186" x2="500" y2="220" stroke="#7fd7e8" stroke-width="2"/>
