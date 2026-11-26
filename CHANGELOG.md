@@ -30,6 +30,11 @@ kernel, log, model or configuration file changes.
 - MoE rows are labelled as per-forward latency ratios, and the natural-router
   figure is marked as an estimate.
 - `CHANGELOG.md`: scan bandwidth corrected to 51.7 MB/s.
+- `README.md`: the quick start now says to run analysis and model utility
+  scripts from the repository root, with a `cd ..` example after the firmware
+  build.
+- `CITATION.cff`: affiliation aligned with the TECS author contact line
+  (`Kharghar, India`).
 
 ### DOI
 

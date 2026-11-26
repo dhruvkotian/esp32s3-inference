@@ -74,6 +74,14 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 The 32 KB build is the cache-sweep baseline, not the headline configuration.
 
+Run the analysis and model utility scripts from the repository root. If you
+have just completed the firmware build, return to the root directory first:
+
+```bash
+cd ..
+python3 tools/analyze_bench.py
+```
+
 The model runtime tools build and verify `.m8` blobs:
 
 ```bash
@@ -137,8 +145,9 @@ fixture is synthetic: no quality or routing claim is made.
 
 ## Reproducing the results
 
-The logs are the raw UART captures the results are computed from. The analysis
-scripts recompute the tables and figures from those logs:
+The logs are the raw UART captures the results are computed from. Run these
+from the repository root; the analysis scripts recompute the tables and figures
+from those logs:
 
 ```bash
 python3 tools/analyze_bench.py

@@ -19,7 +19,7 @@ authors:
     given-names: Dhruv
     orcid: "https://orcid.org/0009-0000-5660-1911"
     email: dhruvjkotian@gmail.com
-    affiliation: "Department of Mechatronics Engineering, Ratan Tata Maharashtra State Skills University (RTMSSU), Kharghar, Navi Mumbai, India"
+    affiliation: "Department of Mechatronics Engineering, Ratan Tata Maharashtra State Skills University (RTMSSU), Kharghar, India"
 license: GPL-3.0-only
 repository-code: "https://github.com/dhruvkotian/esp32s3-inference"
 doi: "10.5281/zenodo.24555021"
