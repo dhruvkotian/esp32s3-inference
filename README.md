@@ -10,6 +10,8 @@ TECS experimental claims: an int8 KV cache in PSRAM and 128-bit PIE attention at
 a PSRAM cache, NVS boot selection and a synthetic MoE prototype. **`v1.3.0` was
 not evaluated in the submitted manuscript.**
 
+![Three memory tiers feed a dual-core execution tier: microSD for model blobs, PSRAM for the int8 KV cache and model library, internal SRAM for int8 weights and the fp32 hot window.](docs/ARCHITECTURE.svg)
+
 ## Platform
 
 | | |
@@ -31,6 +33,11 @@ not evaluated in the submitted manuscript.**
 `v1.2.0` is the release that corresponds to the research results. `v1.3.0`
 builds on it without changing the evaluated kernels or the measured claims.
 
+This repository is a filtered export of a private research tree, so the commit
+IDs are not the original ones. The tag mapping, the files that were reworded and
+the byte-for-byte verification are in
+[`docs/RELEASE-PROVENANCE.md`](docs/RELEASE-PROVENANCE.md).
+
 ## Layout
 
 ```
@@ -41,7 +48,7 @@ config/     sdkconfig snapshots for the 32 KB and 64 KB D-cache variants
 data/       expected outputs and reference metadata
 logs/       raw benchmark captures and runtime test logs
 model/      model provenance, tokenizer and licences
-docs/       hardware, reproduction, model library and SD benchmark documentation
+docs/       hardware, reproduction, model library, SD benchmark and provenance documentation
 ```
 
 ## Quick start
@@ -70,6 +77,13 @@ python3 tools/make_moe_sidecar.py --help
 ## Results at a glance
 
 All values are measured on the board above; the raw captures are in `logs/`.
+The two groups answer different questions and are not comparable with each
+other.
+
+### v1.2.0 — research benchmark results
+
+Fixed 512-token context, batch size one, greedy sampling, same harness in every
+cell. These are the numbers behind the TECS experimental claims.
 
 | Metric | Value |
 |---|---|
@@ -80,13 +94,30 @@ All values are measured on the board above; the raw captures are in `logs/`.
 | Decode forward time | 6.00 ms |
 | int8 KV payload and scales (PSRAM) | 245,760 B |
 | Complete hybrid cache incl. SRAM hot window | 266,240 B |
-| Short-context rate, 16-position hot window | 615 tok/s |
-| Sustained rate over 512 tokens | 46.0 tok/s |
-| Model library, cold select | 377.6 ms |
-| Model library, cached select | 29.4 ms |
+| PSRAM scan traffic | 238,080 B/token |
+| Scan bandwidth | 51.7 MB/s |
+| Attention share of a token | 76.7% |
 
-Accuracy: top-1 predictions match the FP32 reference at all nine evaluation
-depths; combined relative logit RMSE is 1.08% to 4.56%.
+Accuracy: top-1 predictions match the fp32 reference at all nine evaluation
+depths; combined relative logit RMSE is 1.08% to 4.56%, and cosine similarity is
+at least 0.9995052.
+
+### v1.3.0 — model runtime measurements
+
+These describe the runtime layer added after the manuscript was submitted.
+**They were not evaluated in the manuscript and are not claims about the
+evaluated kernels.**
+
+| Metric | Value |
+|---|---|
+| `.m8` blob | 290,816 B |
+| Cold model select (SD -> PSRAM -> SRAM) | 377.6 ms |
+| Cached model select | 29.4 / 30.0 ms |
+| LRU cache, eight selects | 8/8 correct, 3 slots |
+| MoE, pinned expert | 1.00x a plain forward |
+| MoE, natural synthetic router | ~1.9x |
+| MoE, round-robin worst case | 3.33x (4,222 vs 1,266 us) |
+| Expert refill from PSRAM | 58-60 MB/s |
 
 ## Reproducing the results
 
@@ -111,15 +142,30 @@ configuration is part of the experiment, not an implementation detail.
 
 ## Scope and limitations
 
+### v1.2.0 — research claims
+
 - The 260K checkpoint writes simple children's-story English. It is a reflex-tier
   runtime, not an assistant.
-- 615 tok/s is the short-context rate. Sustained over 512 tokens the rate is
-  46.0 tok/s.
-- Energy per token was not measured; no energy claim is made.
-- Runtime model switching requires identical tensor shapes and tokenizer.
+- All measurements come from one ESP32-S3-CAM, silicon v0.2, 8 MB octal PSRAM.
+  The board vendor and revision were not marked and were not recorded.
+- Energy per token was not measured; no energy or thermal claim is made.
+- Accuracy is top-1 and logit agreement with the fp32 reference, not a
+  downstream task benchmark.
+- Throughput depends on D-cache size and line size; the cache configuration is
+  part of the experiment, not an implementation detail.
+
+### v1.3.0 — runtime
+
+- Not evaluated in the submitted manuscript. These measurements time a model
+  switch, not token generation, and are not comparable with the research rate.
+- Runtime switching requires identical tensor shapes and tokenizer. Models with
+  different shapes still require a reboot.
 - The MoE prototype is synthetic: two experts, no training, no quality or
   routing claim.
 - Per-token expert paging from SD is not viable at the measured card rate.
+- Untested: card removal mid-read, power loss during a switch, a real
+  different-shape blob on device, NVS erased or full, and the Wi-Fi download
+  path. See §13 of [`docs/MODEL-LIBRARY-DESIGN.md`](docs/MODEL-LIBRARY-DESIGN.md).
 
 ## Citation
 

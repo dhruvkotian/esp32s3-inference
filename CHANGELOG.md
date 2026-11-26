@@ -4,6 +4,28 @@ All dates are UTC. This repository is the public software tree; the manuscript,
 its production files and submission records are maintained separately and are
 not part of any commit here.
 
+## Unreleased
+
+Documentation and metadata corrections; no firmware change.
+
+### Added
+
+- `docs/RELEASE-PROVENANCE.md`: tag mapping and byte-for-byte verification of
+  the public export against the private research tree.
+- `docs/ARCHITECTURE.svg`: memory tiers, model library and execution diagram.
+
+### Fixed
+
+- `docs/MODEL-LIBRARY-DESIGN.md` records the implemented v1.3.0 state and lists
+  the remaining untested cases in §13 instead of saying the loader is
+  unimplemented.
+- `README.md` separates the v1.2.0 research results from the v1.3.0 runtime
+  measurements, and drops two short-context rates that describe an earlier build
+  and are not in the v1.2.0 captures.
+- `CITATION.cff`: current repository name and URL, the full university name, and
+  a licence statement that matches `LICENSE-PAPER`.
+- `CHANGELOG.md`: scan bandwidth corrected to 51.7 MB/s.
+
 ## v1.3.0 — 2026-11-25
 
 Runtime evolution. Not evaluated in the submitted manuscript.
@@ -72,7 +94,7 @@ experimental claims.
 | Speed-up vs fp32 single core | 2.898x |
 | Speed-up vs fp32 dual core | 2.109x |
 | Decode forward time | 6.00 ms |
-| Scan traffic | 238,080 B/token at 52.3 MB/s |
+| Scan traffic | 238,080 B/token at 51.7 MB/s |
 
 Top-1 predictions match the FP32 reference at all nine evaluation depths;
 combined relative logit RMSE is 1.08% to 4.56%.

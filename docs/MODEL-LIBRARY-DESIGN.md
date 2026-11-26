@@ -1,7 +1,8 @@
 # Prequantized model library: blob format and swap state machine
 
-Status: design plus host-side packer/verifier. Firmware is unchanged; the
-loader and swap state machine are still unimplemented and need approval.
+Status: implemented in `v1.3.0`. This document records the original
+architecture, design decisions, implementation details and validation results.
+The remaining untested cases are listed in §13.
 
 Baseline measured on 2026-11-25:
 
@@ -14,6 +15,11 @@ Baseline measured on 2026-11-25:
 - Free internal SRAM after placement: **~43 KB** on the bench build
   (placement is dynamic; see 4.1)
 - Free PSRAM: **~6.9 MB**
+
+These are the design-time figures. The release re-measured the same card in
+`docs/RELEASE-v1.3.0.md`: FATFS reads 4.31 MB/s and a mount costs 82-88 ms.
+Where the two disagree, the release figures are the ones behind the v1.3.0
+timings.
 
 The goal is a cold-path model library: many models on SD, exactly one active in
 SRAM, and a switch that is fast enough to feel like a session change rather
@@ -728,15 +734,7 @@ blob allocations, with no growth across evictions. The standard image and the
 legacy model partition were restored afterwards
 (`logs/M8-LIB-RESTORE-2026-11-25.log`).
 
-Still open:
-
-1. Remove the card mid-read; needs physical access to the slot, so it remains a
-   manual test. The partition path is already covered by the 10-boot soak.
-2. Power-cycle during a switch; verify boot falls back cleanly.
-3. Exercise `model_compat()` with a real different-shape blob on device. This
-   needs a second trained model; the host-side rules are covered by the header
-   and tensor-table validators.
-4. An atomic download / rename path for models written over Wi-Fi.
+The cases this validation did not exercise are listed in §13.
 
 ## 10. Non-goals for v1
 
@@ -922,3 +920,25 @@ Limits:
 The next useful refinement is session-level per-layer pinning: route once,
 pay one 2.95 ms refill, then run without further copies. That is a trained-model
 experiment, not a firmware one.
+
+## 13. Untested cases
+
+These are the cases the v1.3.0 validation did not exercise. They are listed so
+the release is not read as more complete than it is.
+
+1. **Card removal mid-read.** This needs physical access to the slot, so it
+   remains a manual test. The missing-card and corrupt-file paths are covered,
+   and the partition fallback is covered by the 10-boot soak.
+2. **Power cycle during a switch.** §7 gives the intended behaviour (the next
+   boot falls back to the flash default), but no real power cut was injected
+   during staging, copy or sanity.
+3. **A real different-shape blob on device.** `model_compat()` rejects a
+   header-rewritten shape mismatch, but exercising the check with a second
+   trained checkpoint needs that checkpoint. The host-side rules are covered by
+   the header and tensor-table validators.
+4. **NVS erased or full.** A stale selection falls through to `default.m8` by
+   design; the deleted-namespace and out-of-space paths were not run on the
+   device.
+5. **Atomic download for models written over Wi-Fi.** The `.part` + verify +
+   rename sequence is specified in §7, but Wi-Fi download is not implemented,
+   so the sequence itself is untested.
