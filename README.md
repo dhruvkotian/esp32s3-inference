@@ -1,5 +1,7 @@
 # ESP32-S3 INT8 Transformer Inference
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24555021.svg)](https://doi.org/10.5281/zenodo.24555021)
+
 Firmware, kernels and measurement tooling for running a small int8 transformer
 entirely on an ESP32-S3, plus a model runtime that loads and switches models
 from an SD card.
@@ -33,8 +35,11 @@ not evaluated in the submitted manuscript.**
 
 `v1.2.0` is the release that corresponds to the research results. `v1.3.0`
 builds on it without changing the evaluated kernels or the measured claims.
-`v1.3.1` changes documentation and metadata only; it is the release archived by
-Zenodo for a DOI.
+`v1.3.1` changes documentation and metadata only. It is archived by Zenodo as
+[10.5281/zenodo.24555021](https://doi.org/10.5281/zenodo.24555021); the concept
+DOI [10.5281/zenodo.24555020](https://doi.org/10.5281/zenodo.24555020) resolves
+to the latest version. `v1.2.0` and `v1.3.0` predate the Zenodo integration and
+are not archived there.
 
 This repository is a filtered export of a private research tree, so the commit
 IDs are not the original ones. The tag mapping, the files that were reworded and

@@ -25,6 +25,10 @@ whose commit IDs necessarily differ from the research tree.
 |---|---|---|---|---|
 | `v1.2.0` | Research baseline | `bb021fa` | `ea2cd1c` | 2026-11-22 |
 | `v1.3.0` | Runtime evolution | `4fd16f0` | `e5b340b` | 2026-11-26 |
+| `v1.3.1` | Metadata patch | none (public-only) | `6b23d04` | 2026-11-26 |
+
+`v1.3.1` has no research-tree counterpart: it changes documentation and
+metadata only, and its firmware is byte-identical to `v1.3.0`.
 
 The research commit IDs are recorded for provenance only. They are not
 reachable from this repository and must not be cited as public commits. The
@@ -126,6 +130,7 @@ verifies cleanly:
 |---|---:|---|
 | `v1.2.0` | 127 | 127/127 OK |
 | `v1.3.0` | 166 | 166/166 OK |
+| `v1.3.1` | 168 | 168/168 OK |
 
 ```bash
 git clone https://github.com/dhruvkotian/esp32s3-inference
@@ -133,3 +138,17 @@ cd esp32s3-inference
 git checkout v1.2.0
 sha256sum -c MANIFEST.sha256
 ```
+
+## Zenodo archive
+
+`v1.3.1` is the archived release:
+
+| Version DOI | Concept DOI | Record |
+|---|---|---|
+| `10.5281/zenodo.24555021` | `10.5281/zenodo.24555020` | <https://zenodo.org/records/24555021> |
+
+Zenodo archives releases created after the repository integration was enabled,
+so `v1.2.0` and `v1.3.0` are not archived. The ZIP for `v1.3.1` is built from the
+tag, which predates the `doi` field added to `CITATION.cff` on `main` afterwards.
+The tag is not moved; the DOI on `main`, in the release notes and in
+`CITATION.cff` is the citation target.

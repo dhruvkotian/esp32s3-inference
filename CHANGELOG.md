@@ -31,6 +31,14 @@ kernel, log, model or configuration file changes.
   figure is marked as an estimate.
 - `CHANGELOG.md`: scan bandwidth corrected to 51.7 MB/s.
 
+### DOI
+
+- Archived by Zenodo as
+  [10.5281/zenodo.24555021](https://doi.org/10.5281/zenodo.24555021); concept DOI
+  [10.5281/zenodo.24555020](https://doi.org/10.5281/zenodo.24555020). The DOI was
+  assigned after the tag was cut, so it is recorded on `main` and in the release
+  notes rather than inside the tagged tree.
+
 ## v1.3.0 — 2026-11-25
 
 Runtime evolution. Not evaluated in the submitted manuscript.

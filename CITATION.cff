@@ -22,6 +22,11 @@ authors:
     affiliation: "Department of Mechatronics Engineering, Ratan Tata Maharashtra State Skills University (RTMSSU), Kharghar, Navi Mumbai, India"
 license: GPL-3.0-only
 repository-code: "https://github.com/dhruvkotian/esp32s3-inference"
+doi: "10.5281/zenodo.24555021"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24555020
+    description: "Concept DOI, resolves to the latest archived version"
 version: 1.3.1
 date-released: 2026-11-26
 keywords:
