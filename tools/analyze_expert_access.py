@@ -2,11 +2,11 @@
 """Summarise the PSRAM-resident expert access benchmark.
 
 Reads a UART capture containing the `EA_*` lines printed by
-firmware/main/expert_access_bench.c and prints a per-configuration table.
+firmware/main/expert_access_bench.c and prints a per-configuration table,
+separating cold runs from warm repeats.
 
 Usage:
     python3 tools/analyze_expert_access.py logs/expert_access.log
-    idf.py monitor | tee logs/expert_access.log
     python3 tools/analyze_expert_access.py logs/expert_access.log --csv out.csv
 
 The benchmark runs three memory-access modes over identical weights:
@@ -17,6 +17,11 @@ The benchmark runs three memory-access modes over identical weights:
 
 All modes move the same number of bytes out of PSRAM per expert forward, so the
 MB/s column is comparable across them.
+
+Run 0 of each configuration is cold (the D-cache is evicted first); runs 1 and
+later are warm repeats. They are reported separately because pooling them hides
+the difference. Compare modes on total_us: for A that is copy plus compute, for
+B it is the direct compute alone.
 """
 
 from __future__ import annotations
@@ -58,17 +63,21 @@ def as_int(rec: dict, key: str, default: int = 0) -> int:
         return default
 
 
-def as_float(rec: dict, key: str, default: float = 0.0) -> float:
-    try:
-        return float(rec.get(key, default))
-    except (TypeError, ValueError):
-        return default
+def cache_state(rec: dict) -> str:
+    """Run 0 is the cold measurement; every later run is a warm repeat."""
+    return "cold" if as_int(rec, "run") == 0 else "warm"
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("log", nargs="?", help="capture file; stdin when omitted")
     ap.add_argument("--csv", type=Path, help="write the grouped table as CSV")
+    ap.add_argument(
+        "--min-runs",
+        type=int,
+        default=2,
+        help="flag warm groups with fewer repeats than this (default: 2)",
+    )
     args = ap.parse_args(argv)
 
     if args.log:
@@ -85,29 +94,36 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
     print()
 
-    groups: dict[tuple[str, int, str], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, int, str, str], list[dict]] = defaultdict(list)
     for rec in runs:
-        key = (str(rec.get("mode")), as_int(rec, "tile"), str(rec.get("pattern")))
+        key = (
+            str(rec.get("mode")),
+            as_int(rec, "tile"),
+            str(rec.get("pattern")),
+            cache_state(rec),
+        )
         groups[key].append(rec)
 
     header = (
-        f"{'mode':<11} {'tile':>6} {'pattern':<12} {'runs':>4} "
+        f"{'mode':<11} {'tile':>6} {'pattern':<12} {'state':<5} {'runs':>4} "
         f"{'copy_us':>8} {'comp_us':>8} {'total_us':>9} {'MB/s':>7} {'bytes':>9}"
     )
     print(header)
     print("-" * len(header))
 
     rows = []
-    for key in sorted(groups, key=lambda k: (k[0], k[1], k[2])):
-        mode, tile, pattern = key
+    thin: list[tuple[str, int, str, str, int]] = []
+    order = {"cold": 0, "warm": 1}
+    for key in sorted(groups, key=lambda k: (k[0], k[1], k[2], order.get(k[3], 9))):
+        mode, tile, pattern, state = key
         recs = groups[key]
-        copy_us = statistics.median(as_int(r, "copy_us") for r in recs)
-        comp_us = statistics.median(as_int(r, "comp_us") for r in recs)
-        total_us = statistics.median(as_int(r, "total_us") for r in recs)
-        nbytes = statistics.median(as_int(r, "psram_bytes") for r in recs)
+        copy_us = int(statistics.median(as_int(r, "copy_us") for r in recs))
+        comp_us = int(statistics.median(as_int(r, "comp_us") for r in recs))
+        total_us = int(statistics.median(as_int(r, "total_us") for r in recs))
+        nbytes = int(statistics.median(as_int(r, "psram_bytes") for r in recs))
         mbps = (nbytes / total_us) if total_us else 0.0
         print(
-            f"{mode:<11} {tile:>6} {pattern:<12} {len(recs):>4} "
+            f"{mode:<11} {tile:>6} {pattern:<12} {state:<5} {len(recs):>4} "
             f"{copy_us:>8} {comp_us:>8} {total_us:>9} {mbps:>7.1f} {nbytes:>9}"
         )
         rows.append(
@@ -115,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
                 "mode": mode,
                 "tile": tile,
                 "pattern": pattern,
+                "state": state,
                 "runs": len(recs),
                 "copy_us": copy_us,
                 "comp_us": comp_us,
@@ -123,16 +140,30 @@ def main(argv: list[str] | None = None) -> int:
                 "psram_bytes": nbytes,
             }
         )
+        # A cold group is a single run by construction; only warm repeats can
+        # be under-sampled.
+        if state == "warm" and len(recs) < args.min_runs:
+            thin.append((mode, tile, pattern, state, len(recs)))
 
     print()
     print("Reading it:")
-    print("  - Compare mode A with mode B at the same pattern. A and B move the")
-    print("    same PSRAM bytes, so any gap is the cost or benefit of the SRAM")
-    print("    round trip versus cached 128-bit loads from the mapping.")
-    print("  - Compare mode C tiles against A. C only wins if bounded tiles keep")
-    print("    the pipeline busier than one large per-layer copy.")
-    print("  - The C-prefetch rows include the software-touch time in copy_us.")
-    print("  - run=0 is cold (D-cache evicted); run=1.. are warm repeats.")
+    print("  - Compare A with B on total_us at the same pattern and state. They")
+    print("    move the same PSRAM bytes, so any gap is the SRAM round trip")
+    print("    against cached 128-bit loads from the mapping.")
+    print("  - Cold and warm rows answer different questions. The cold row is")
+    print("    the first touch of the expert; the warm row is what a steady-state")
+    print("    token loop sees.")
+    print("  - Mode C stages weight tiles but reads the row scales directly from")
+    print("    PSRAM, so A vs C is not a pure copy-versus-stream comparison.")
+    print("  - C-prefetch rows include the software pre-touch time in copy_us.")
+    print("  - 'alternating' switches the expert between layers of one forward")
+    print("    pass; it does not yet model per-token router instability.")
+
+    if thin:
+        print()
+        print(f"Under-sampled warm groups (fewer than {args.min_runs} repeats):")
+        for mode, tile, pattern, state, n in thin:
+            print(f"  {mode} tile={tile} {pattern} {state}: {n}")
 
     if args.csv:
         with args.csv.open("w", newline="", encoding="utf-8") as fh:

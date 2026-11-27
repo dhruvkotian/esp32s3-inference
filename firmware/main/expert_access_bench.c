@@ -13,6 +13,14 @@
 // All three move 8 x 79,296 B out of PSRAM per expert forward, so the MB/s
 // column is directly comparable. Mode C also has a software-prefetch variant
 // that touches the next tile's cache lines before computing the current one.
+// That is an ordinary CPU read, not the hardware manual D-cache preload.
+//
+// Two interpretation caveats:
+//   - Mode C stages weight tiles but still reads the row-scale vector straight
+//     from PSRAM, so A vs C is not a pure copy-versus-stream comparison.
+//   - The "alternating" pattern alternates the expert between layers of one
+//     forward pass. It does not yet model a router changing its choice between
+//     consecutive tokens at the same layer.
 //
 // Output is key=value lines on stdout, parsed by
 // tools/analyze_expert_access.py.
@@ -54,7 +62,12 @@
 
 #define EA_XS         (1.0f / 127.0f)
 #define EA_CPU_MHZ    240
+// Run 0 is cold (D-cache evicted), runs 1.. are warm repeats. Bump this to 10
+// for a stable comparison once a configuration looks promising; the analyser
+// separates cold from warm and flags under-sampled groups.
+#ifndef EA_RUNS
 #define EA_RUNS       3
+#endif
 #define EA_EVICT_BYTES (128 * 1024)
 #define EA_TILE_MAX   (16 * 1024)
 
@@ -211,6 +224,70 @@ static void ea_stream_mat(const ea_mat_t *mt, const int8_t *act,
         r->copy_cyc += c1 - c0;
         r->comp_cyc += c2 - c1;
     }
+}
+
+// Element-wise agreement for one output matrix.
+static void ea_cmp(const float *x, const float *y, int n, float *maxd, int *diff)
+{
+    float m = 0.0f;
+    int d = 0;
+    for (int i = 0; i < n; i++) {
+        if (x[i] != y[i]) {
+            d++;
+        }
+        float ad = fabsf(x[i] - y[i]);
+        if (ad > m) {
+            m = ad;
+        }
+    }
+    *maxd = m;
+    *diff = d;
+}
+
+// Element-wise equivalence on layer 0, per matrix. The aggregate accumulator
+// in EA_RUN is only a sanity check: two different vectors can share a sum, so
+// this compares every element of W1, W3 and W2 output separately.
+static float eq_a1[EA_HID], eq_a2[EA_HID], eq_a3[EA_DIM];
+static float eq_b1[EA_HID], eq_b2[EA_HID], eq_b3[EA_DIM];
+static float eq_c1[EA_HID], eq_c2[EA_HID], eq_c3[EA_DIM];
+
+static void ea_equiv_pass(const int8_t *psram, int8_t *sram,
+                          int8_t *t0, int8_t *t1, const int8_t *act,
+                          int tile_bytes)
+{
+    memcpy(sram, psram, EA_LAYER_BYTES);
+    ea_layer_mm(sram, act, eq_a1, eq_a2, eq_a3);
+
+    ea_layer_mm(psram, act, eq_b1, eq_b2, eq_b3);
+
+    const int8_t *base = psram;
+    ea_result_t sink;
+    memset(&sink, 0, sizeof sink);
+    ea_mat_t m1 = {base + EA_OFF_W1, (const float *)(base + EA_OFF_S1), eq_c1,
+                   EA_HID, EA_W1_STRIDE};
+    ea_mat_t m3 = {base + EA_OFF_W3, (const float *)(base + EA_OFF_S3), eq_c2,
+                   EA_HID, EA_W1_STRIDE};
+    ea_mat_t m2 = {base + EA_OFF_W2, (const float *)(base + EA_OFF_S2), eq_c3,
+                   EA_DIM, EA_W2_STRIDE};
+    ea_stream_mat(&m1, act, t0, t1, tile_bytes, false, &sink);
+    ea_stream_mat(&m3, act, t0, t1, tile_bytes, false, &sink);
+    ea_stream_mat(&m2, act, t0, t1, tile_bytes, false, &sink);
+
+    float b1m, b2m, b3m, c1m, c2m, c3m;
+    int b1d, b2d, b3d, c1d, c2d, c3d;
+    ea_cmp(eq_a1, eq_b1, EA_HID, &b1m, &b1d);
+    ea_cmp(eq_a2, eq_b2, EA_HID, &b2m, &b2d);
+    ea_cmp(eq_a3, eq_b3, EA_DIM, &b3m, &b3d);
+    ea_cmp(eq_a1, eq_c1, EA_HID, &c1m, &c1d);
+    ea_cmp(eq_a2, eq_c2, EA_HID, &c2m, &c2d);
+    ea_cmp(eq_a3, eq_c3, EA_DIM, &c3m, &c3d);
+
+    printf("EA_EQUIV pair=a_b ok=%d w1_max=%.6f w1_diff=%d w3_max=%.6f "
+           "w3_diff=%d w2_max=%.6f w2_diff=%d\n",
+           b1d == 0 && b2d == 0 && b3d == 0, b1m, b1d, b2m, b2d, b3m, b3d);
+    printf("EA_EQUIV pair=a_c ok=%d w1_max=%.6f w1_diff=%d w3_max=%.6f "
+           "w3_diff=%d w2_max=%.6f w2_diff=%d\n",
+           c1d == 0 && c2d == 0 && c3d == 0, c1m, c1d, c2m, c2d, c3m, c3d);
 }
 
 // Mode C: bounded tiles, alternating between two SRAM buffers.
@@ -423,8 +500,10 @@ void expert_access_bench_run(void)
         }
     }
 
-    printf("EA_EQUIV a_vs_b=%d a_vs_c=%d a=%.6f b=%.6f c=%.6f\n",
-           acc_a == acc_b, acc_a == acc_c, acc_a, acc_b, acc_c);
+    printf("EA_ACC a=%.6f b=%.6f c=%.6f equal_ab=%d equal_ac=%d\n",
+           acc_a, acc_b, acc_c, acc_a == acc_b, acc_a == acc_c);
+    ea_equiv_pass((const int8_t *)psram, sram, tile, tile + EA_TILE_MAX, act,
+                  4096);
 
     ea_control64(sram, &seed);
 

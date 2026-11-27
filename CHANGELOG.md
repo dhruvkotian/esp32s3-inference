@@ -15,13 +15,18 @@ no released binary, log or result is affected.
 - `firmware/main/expert_access_bench.c`: standalone A/B/C memory-access
   benchmark for int8 expert weights at the d=96 / hidden=264 geometry. No model,
   sidecar or SD card is used; it exits from `bench_main()` before the mount.
+- Element-wise equivalence: `EA_ACC` keeps the aggregate float sum as a sanity
+  check, and `EA_EQUIV` reports the maximum absolute difference and the number
+  of differing elements for W1, W3 and W2 separately, for A vs B and A vs C.
 - `firmware/main/llm.h`, `llm.c`: `llm_mm_s8_generic()`, the per-row loop
   `mm_q_pre()` already uses for strides other than 64, exported so the benchmark
   measures the real generic path instead of a copy of it.
-- `tools/analyze_expert_access.py`: groups the `EA_RUN` lines by mode, tile and
-  pattern and reports median copy/compute/total time and effective MB/s.
-- `docs/EXPERT-ACCESS-BENCH.md`: geometry, modes, how to run, and the decision
-  rule for interpreting the result.
+- `tools/analyze_expert_access.py`: groups the `EA_RUN` lines by mode, tile,
+  pattern and cache state, reports median copy/compute/total time and effective
+  MB/s, and flags under-sampled warm groups.
+- `docs/EXPERT-ACCESS-BENCH.md`: geometry, modes, the two-capture procedure
+  (runtime memory with `BENCH_MODE 0`, A/B/C with `EXPERT_ACCESS_BENCH 1`), and
+  the decision table for interpreting the result.
 - `main.c`: `MOE_MEM` diagnostics at six boot stages, including the largest
   contiguous PSRAM block, which free bytes alone do not reveal.
 
