@@ -24,6 +24,11 @@ no released binary, log or result is affected.
 - `tools/analyze_expert_access.py`: groups the `EA_RUN` lines by mode, tile,
   pattern and cache state, reports median copy/compute/total time and effective
   MB/s, and flags under-sampled warm groups.
+- `EA_COLD_EVERY`: `#ifndef`-guarded, default `0`. With `EA_COLD_EVERY 1` the
+  D-cache is evicted before every run, so `EA_RUNS = 10` yields ten independent
+  cold observations instead of one cold and nine warm ones. Every `EA_RUN`
+  record now carries `cold=1`/`cold=0` so the analyser groups correctly under
+  either policy.
 - `docs/EXPERT-ACCESS-BENCH.md`: geometry, modes, the two-capture procedure
   (runtime memory with `BENCH_MODE 0`, A/B/C with `EXPERT_ACCESS_BENCH 1`), and
   the decision table for interpreting the result.
@@ -32,9 +37,9 @@ no released binary, log or result is affected.
 
 ### Changed
 
-- `model_lib.h`: `MODEL_CACHE_SLOTS` can be overridden at build time
-  (`-DMODEL_CACHE_SLOTS=0`) to measure the no-cache configuration. Default is
-  still 3.
+- `model_lib.h`: `MODEL_CACHE_SLOTS` is `#ifndef`-guarded so the no-cache
+  configuration can be built by setting it to `0` (the procedure edits the
+  header). Default is still 3.
 
 ### Not changed
 

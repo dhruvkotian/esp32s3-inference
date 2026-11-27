@@ -68,6 +68,12 @@
 #ifndef EA_RUNS
 #define EA_RUNS       3
 #endif
+
+// 0: only run 0 is cold, so EA_RUNS=10 gives one cold and nine warm samples.
+// 1: evict before every run, so EA_RUNS=10 gives ten independent cold samples.
+#ifndef EA_COLD_EVERY
+#define EA_COLD_EVERY 0
+#endif
 #define EA_EVICT_BYTES (128 * 1024)
 #define EA_TILE_MAX   (16 * 1024)
 
@@ -320,10 +326,13 @@ static void ea_print(const char *mode, const char *pattern, int run, int tile,
     uint32_t total = r->copy_cyc + r->comp_cyc;
     double us = (double)total / (double)EA_CPU_MHZ;
     double mbps = us > 0.0 ? (double)psram_bytes / us : 0.0;
-    printf("EA_RUN mode=%s pattern=%s run=%d tile=%d copy_cyc=%u comp_cyc=%u "
-           "total_cyc=%u copy_us=%u comp_us=%u total_us=%u psram_bytes=%llu "
-           "mbps=%.2f acc=%.6f\n",
-           mode, pattern, run, tile,
+    // Emit the state explicitly: with EA_COLD_EVERY=1 every run is cold, so
+    // "run == 0" alone is not a reliable cold marker for the analyser.
+    int cold = (run == 0 || EA_COLD_EVERY) ? 1 : 0;
+    printf("EA_RUN mode=%s pattern=%s run=%d cold=%d tile=%d copy_cyc=%u "
+           "comp_cyc=%u total_cyc=%u copy_us=%u comp_us=%u total_us=%u "
+           "psram_bytes=%llu mbps=%.2f acc=%.6f\n",
+           mode, pattern, run, cold, tile,
            (unsigned)r->copy_cyc, (unsigned)r->comp_cyc, (unsigned)total,
            (unsigned)(r->copy_cyc / EA_CPU_MHZ),
            (unsigned)(r->comp_cyc / EA_CPU_MHZ),
@@ -461,7 +470,7 @@ void expert_access_bench_run(void)
     for (int p = 0; p < 2; p++) {
         for (int run = 0; run < EA_RUNS; run++) {
             ea_result_t r;
-            if (run == 0) {
+            if (run == 0 || EA_COLD_EVERY) {
                 ea_touch((const int8_t *)evict, EA_EVICT_BYTES);
             }
             ea_mode_a((const int8_t *)psram, sram, act, o1, o2, o3, p, &r);
@@ -472,7 +481,7 @@ void expert_access_bench_run(void)
         }
         for (int run = 0; run < EA_RUNS; run++) {
             ea_result_t r;
-            if (run == 0) {
+            if (run == 0 || EA_COLD_EVERY) {
                 ea_touch((const int8_t *)evict, EA_EVICT_BYTES);
             }
             ea_mode_b((const int8_t *)psram, act, o1, o2, o3, p, &r);
@@ -485,7 +494,7 @@ void expert_access_bench_run(void)
             for (int pf = 0; pf < 2; pf++) {
                 for (int run = 0; run < EA_RUNS; run++) {
                     ea_result_t r;
-                    if (run == 0) {
+                    if (run == 0 || EA_COLD_EVERY) {
                         ea_touch((const int8_t *)evict, EA_EVICT_BYTES);
                     }
                     ea_mode_c((const int8_t *)psram, tile, tile + EA_TILE_MAX,

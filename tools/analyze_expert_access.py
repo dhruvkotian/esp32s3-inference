@@ -64,7 +64,14 @@ def as_int(rec: dict, key: str, default: int = 0) -> int:
 
 
 def cache_state(rec: dict) -> str:
-    """Run 0 is the cold measurement; every later run is a warm repeat."""
+    """Prefer the explicit cold flag; fall back to run 0 for older captures.
+
+    The firmware emits cold=1 when the D-cache was evicted before that run.
+    Without the flag (EA_COLD_EVERY=0 captures still set it, but older logs may
+    not) run 0 is the cold measurement and every later run is a warm repeat.
+    """
+    if "cold" in rec:
+        return "cold" if as_int(rec, "cold") else "warm"
     return "cold" if as_int(rec, "run") == 0 else "warm"
 
 

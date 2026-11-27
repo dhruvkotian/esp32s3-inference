@@ -154,8 +154,10 @@ cd firmware && idf.py build
 
 ## Reading the output
 
-The analyser separates **cold** (run 0, D-cache evicted) from **warm** (runs 1+)
-because pooling them hides the difference. Compare modes on `total_us`, not on
+The analyser separates **cold** (D-cache evicted before the run) from **warm**
+(no eviction) because pooling them hides the difference. The firmware emits the
+state on every record (`cold=1` / `cold=0`), so the grouping stays correct even
+when the eviction policy changes. Compare modes on `total_us`, not on
 `comp_us`: for A that is copy plus compute, for B it is the direct compute
 alone.
 
@@ -165,13 +167,36 @@ alone.
 | B clearly slower than A | Investigate tiled staging and memory access |
 | C beats A | Investigate an optimised bounded-buffer path |
 | C loses to A | Don't spend SRAM on tiles without a demonstrated benefit |
+| C-prefetch clearly beats C | Investigate cache preloading or DMA |
 | All similar | Prefer the simpler design with lower SRAM use |
 
 Mode B must beat Mode A on **total elapsed time**, not merely on compute time.
 `T_A = T_copy + T_compute`, `T_B = T_direct_compute`.
 
-If one configuration looks promising, raise `EA_RUNS` to 10 and repeat just that
-configuration before committing to a design.
+### Sampling cold and warm
+
+By default only run 0 is cold, so `EA_RUNS = 10` gives **one cold and nine warm**
+observations. That is not ten independent cold runs, and it must not be read as
+one. Two settings control this, both `#ifndef`-guarded:
+
+| Setting | Effect |
+|---|---|
+| `EA_RUNS` (default 3) | Repeats per configuration |
+| `EA_COLD_EVERY` (default 0) | `1` evicts the D-cache before every run |
+
+For a stable **warm** comparison, raise only `EA_RUNS`. For a stable **cold**
+comparison, set `EA_COLD_EVERY 1` and raise `EA_RUNS`; every run is then an
+independent cold observation, and the analyser reports them all as `cold`:
+
+```bash
+sed -i 's/#define EA_RUNS       3/#define EA_RUNS       10/' \
+    firmware/main/expert_access_bench.c
+sed -i 's/#define EA_COLD_EVERY 0/#define EA_COLD_EVERY 1/' \
+    firmware/main/expert_access_bench.c
+```
+
+Restore both to `3` and `0` afterwards. Do not mix the two modes in one capture;
+they answer different questions.
 
 ## Caveats
 
@@ -186,9 +211,11 @@ configuration before committing to a design.
   128-bit loads. Each weight byte is touched once per forward, so the line is
   fetched once and never reused. The benchmark measures the consequence rather
   than asserting it.
-- **Single core.** Copy and compute cannot overlap without GDMA, so expect C to
-  lose slightly to A. That is itself a result: tile buffers are not worth their
-  SRAM until DMA is in the picture.
+- **Single core, synchronous tiles.** Copy and compute cannot overlap without
+  DMA, so C is expected to lose slightly to A. If it does, that does **not**
+  disprove a genuinely pipelined DMA implementation; it only says synchronous
+  tiling is not worth the SRAM on its own. Tiles become a candidate again only
+  if prefetch helps materially or a DMA path is built and measured.
 
 ## Predicted, not measured
 
