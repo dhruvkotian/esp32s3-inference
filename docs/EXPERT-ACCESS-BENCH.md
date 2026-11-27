@@ -156,13 +156,14 @@ cd firmware && idf.py build
 
 The analyser separates **cold** (D-cache evicted before the run) from
 **no-evict** (no eviction sweep) because pooling them hides the difference.
-"no-evict" is not "warm": the 634 KB working set is far larger than the 64 KB
-cache, so the expert is never fully cache-resident. The label only records that
-no sweep was performed. The firmware emits the
-state on every record (`cold=1` / `cold=0`), so the grouping stays correct even
-when the eviction policy changes. Compare modes on `total_us`, not on
-`comp_us`: for A that is copy plus compute, for B it is the direct compute
-alone.
+"cold" means a defined **post-eviction measurement**, not a cold boot: the
+sweep is performed immediately before that run. "no-evict" is not "warm": the
+634 KB working set is far larger than the 64 KB cache, so the expert is never
+fully cache-resident. That label only records that no sweep was performed. The
+firmware emits the state on every record (`cold=1` / `cold=0`), so the grouping
+stays correct even when the eviction policy changes. Compare modes on
+`total_us`, not on `comp_us`: for A that is copy plus compute, for B it is the
+direct compute alone.
 
 | Result | Engineering decision |
 |---|---|

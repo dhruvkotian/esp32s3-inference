@@ -70,8 +70,10 @@
 #define EA_RUNS       3
 #endif
 
-// 0: only run 0 is cold, so EA_RUNS=10 gives one cold and nine warm samples.
-// 1: evict before every run, so EA_RUNS=10 gives ten independent cold samples.
+// 0: only run 0 has an eviction sweep.
+//    EA_RUNS=10 gives one post-eviction sample and nine no-evict repeats.
+// 1: evict before every run.
+//    EA_RUNS=10 gives ten post-eviction samples.
 #ifndef EA_COLD_EVERY
 #define EA_COLD_EVERY 0
 #endif
