@@ -59,6 +59,10 @@ model/      model provenance, tokenizer and licences
 docs/       hardware, reproduction, model library, SD benchmark and provenance documentation
 ```
 
+The v1.4.0 expert-access investigation is documented separately in
+[`docs/EXPERT-ACCESS-BENCH.md`](docs/EXPERT-ACCESS-BENCH.md). It is off by
+default and does not affect any released result.
+
 ## Quick start
 
 The research configuration is the 64 KB D-cache build:

@@ -141,3 +141,9 @@ int32_t llm_dot16_s8(const int8_t *a, const int8_t *b);
 void llm_dot16x4_s8(const int8_t *a, const int8_t *b, int stride, int32_t out[4]);
 void llm_mm_s8_64(const int8_t *act, const int8_t *w, const float *scale,
                   const float *xs, float *out, int nrows);
+
+// The same per-row loop mm_q_pre() uses when stride != 64, exported so the
+// v1.4.0 expert-access benchmark measures the real generic path rather than a
+// copy of it. act and w must be 16-byte aligned and stride a multiple of 16.
+void llm_mm_s8_generic(const int8_t *act, const int8_t *w, const float *scale,
+                       float xs, float *out, int nrows, int stride);

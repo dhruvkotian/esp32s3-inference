@@ -4,6 +4,38 @@ All dates are UTC. This repository is the public software tree; the manuscript,
 its production files and submission records are maintained separately and are
 not part of any commit here.
 
+## Unreleased — v1.4.0 investigation
+
+PSRAM-resident expert access benchmark. Firmware default behaviour is
+unchanged: the benchmark is compiled but disabled (`EXPERT_ACCESS_BENCH 0`), and
+no released binary, log or result is affected.
+
+### Added
+
+- `firmware/main/expert_access_bench.c`: standalone A/B/C memory-access
+  benchmark for int8 expert weights at the d=96 / hidden=264 geometry. No model,
+  sidecar or SD card is used; it exits from `bench_main()` before the mount.
+- `firmware/main/llm.h`, `llm.c`: `llm_mm_s8_generic()`, the per-row loop
+  `mm_q_pre()` already uses for strides other than 64, exported so the benchmark
+  measures the real generic path instead of a copy of it.
+- `tools/analyze_expert_access.py`: groups the `EA_RUN` lines by mode, tile and
+  pattern and reports median copy/compute/total time and effective MB/s.
+- `docs/EXPERT-ACCESS-BENCH.md`: geometry, modes, how to run, and the decision
+  rule for interpreting the result.
+- `main.c`: `MOE_MEM` diagnostics at six boot stages, including the largest
+  contiguous PSRAM block, which free bytes alone do not reveal.
+
+### Changed
+
+- `model_lib.h`: `MODEL_CACHE_SLOTS` can be overridden at build time
+  (`-DMODEL_CACHE_SLOTS=0`) to measure the no-cache configuration. Default is
+  still 3.
+
+### Not changed
+
+- `moe.h` format limits, the `MOE1` sidecar, `moe_hook()` and the routing path.
+- No training, no router changes, no new model artifact.
+
 ## v1.3.1 — 2026-11-26
 
 Metadata and documentation patch. Firmware is byte-identical to `v1.3.0`; no

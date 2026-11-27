@@ -3,6 +3,13 @@
 #define HOT_POS 16
 #define WEIGHTS_PSRAM 0
 #define DUMP_LOGITS 1
+
+// v1.4.0 investigation: standalone PSRAM-resident expert access benchmark.
+// Builds its own synthetic expert blocks; needs no model, sidecar or SD card.
+// It runs before the SD mount and exits the bench after EA_END, so the normal
+// MOE_TEST / LIB_TEST paths are unaffected while this is 1.
+#define EXPERT_ACCESS_BENCH 0
+
 // Run the nine-depth accuracy harness. Independent of KV_INT8 so the int8
 // weight path can be measured against fp32 KV as well as int8 KV.
 #define KVCHECK 1

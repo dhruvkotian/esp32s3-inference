@@ -46,9 +46,25 @@
 #include "model_lib.h"
 #include "model_prefs.h"
 #include "moe.h"
+#include "expert_access_bench.h"
 #include "bench_cfg.h"
 
 static const char *TAG = "llms3";
+
+// Experiment 0 of the v1.4.0 expert-access investigation: the numbers that
+// decide whether a PSRAM-resident MoE can exist on this board at all. Logged as
+// a single MOE_MEM line so a capture can be filtered and diffed.
+static void mem_report(const char *stage)
+{
+    ESP_LOGI("MOE_MEM",
+             "stage=%s psram_free=%u psram_largest=%u internal_free=%u "
+             "internal_largest=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+}
 
 // Active stage cache for runtime switching. It holds the active blob in PSRAM
 // so a failed switch can roll back without touching the card.
@@ -1298,6 +1314,7 @@ static void moe_test(llm_t *m, tokenizer_t *tk)
            (unsigned)slice, (unsigned)(slice * m->n_layers),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     fflush(stdout);
+    mem_report("moe_bound");
 
     moe_stats_t s;
 
@@ -1763,6 +1780,14 @@ static void bench_main(void)
     dot_selftest();
     bench_psram();
 
+#if EXPERT_ACCESS_BENCH
+    // Standalone: no model, no sidecar, no SD card. Exits before the mount.
+    expert_access_bench_run();
+    printf("BENCH_DONE\n");
+    fflush(stdout);
+    return;
+#endif
+
     sdmmc_card_t *card = NULL;
     bool sd_ok = sd_mount(&card);
 
@@ -1953,9 +1978,11 @@ void app_main(void)
     banner();
     dot_selftest();
     hw_bench();
+    mem_report("boot");
 
     sdmmc_card_t *card = NULL;
     bool sd_ok = sd_mount(&card);
+    mem_report("pre_boot");
     if (sd_ok) {
         ESP_LOGI(TAG, "SD root:");
         sd_list("/sdcard");
@@ -1979,6 +2006,7 @@ void app_main(void)
         ESP_LOGI(TAG, "source: .m8 blob (%u B), tokenizer embedded", (unsigned)m8_bytes);
     }
     ESP_LOGI(TAG, "tokenizer: vocab=%d max_token_len=%d", tk.vocab_size, tk.max_token_length);
+    mem_report("backbone");
 
     const char *prompt = "Once upon a time";
     int probe[32];
@@ -2004,6 +2032,7 @@ void app_main(void)
         ESP_LOGI(TAG, "int8 weights came from the .m8 blob");
     }
     llm_print_mem(m);
+    mem_report("arena");
 
     // ---- fp32 reference path (correctness) ----
     // Only the legacy checkpoint carries the fp32 tensors. The .m8 build is
@@ -2026,6 +2055,7 @@ void app_main(void)
     int bad8 = match_expected(&gq);
     ESP_LOGI(TAG, "int8 vs fp32 reference: %s", bad8 < 0 ? "MATCH" : "DIFFERS");
     report_prof(m, gq.n_prompt + gq.n_gen);
+    mem_report("warmup");
     if (bad8 >= 0) {
         ESP_LOGI(TAG, "  first differing token index %d (int8=%d expected=%d)",
                  bad8, gq.ids[bad8], EXPECTED[bad8]);

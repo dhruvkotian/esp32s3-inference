@@ -289,6 +289,18 @@ static void mm_q_pre(llm_t *m, float *out, const qmat_t *W, int row0, int nrows,
     }
 }
 
+// Exported form of the generic row loop above. The expert-access benchmark
+// calls this directly so modes A/B/C differ only in where the weight bytes
+// come from, never in the arithmetic.
+void llm_mm_s8_generic(const int8_t *act, const int8_t *w, const float *sc,
+                       float xs, float *out, int nrows, int stride)
+{
+    for (int r = 0; r < nrows; r++) {
+        int32_t d = dot_s8_i(w + (size_t)r * (size_t)stride, act, stride);
+        out[r] = (float)d * xs * sc[r];
+    }
+}
+
 static void mm_q(llm_t *m, float *out, const float *x, const qmat_t *W, int row0, int nrows)
 {
     float xs;

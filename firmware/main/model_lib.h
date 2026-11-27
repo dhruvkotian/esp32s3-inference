@@ -15,8 +15,12 @@
 #define M8_TENSOR_BYTES 36
 
 // Inactive models kept in PSRAM for fast switching. The active model is held
-// separately, so peak PSRAM is (MODEL_CACHE_SLOTS + 1) blobs.
+// separately, so peak PSRAM is (MODEL_CACHE_SLOTS + 1) blobs. Override with
+// -DMODEL_CACHE_SLOTS=0 to measure the no-cache configuration; the loops that
+// walk the cache become no-ops and the arrays are zero-length.
+#ifndef MODEL_CACHE_SLOTS
 #define MODEL_CACHE_SLOTS 3
+#endif
 
 typedef enum {
     MODEL_OK = 0,
