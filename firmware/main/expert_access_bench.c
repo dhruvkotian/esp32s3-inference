@@ -62,9 +62,10 @@
 
 #define EA_XS         (1.0f / 127.0f)
 #define EA_CPU_MHZ    240
-// Run 0 is cold (D-cache evicted), runs 1.. are warm repeats. Bump this to 10
-// for a stable comparison once a configuration looks promising; the analyser
-// separates cold from warm and flags under-sampled groups.
+// Run 0 is cold (D-cache evicted); later runs are measured without an explicit
+// eviction and are reported as "no-evict", not "warm": the 634 KB working set
+// does not fit the 64 KB cache, so the expert is never fully cache-resident.
+// Bump EA_RUNS for a stable comparison once a configuration looks promising.
 #ifndef EA_RUNS
 #define EA_RUNS       3
 #endif
@@ -438,6 +439,10 @@ void expert_access_bench_run(void)
         free(o3);
         return;
     }
+
+    // heap_caps_malloc() is not zeroed. Initialise the eviction buffer so the
+    // sweep reads defined data; its purpose is only to displace cache lines.
+    memset(evict, 0xA5, EA_EVICT_BYTES);
 
     uint32_t seed = 0x12345678u;
     for (int e = 0; e < EA_EXPERTS; e++) {

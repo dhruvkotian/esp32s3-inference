@@ -23,10 +23,10 @@ no released binary, log or result is affected.
   measures the real generic path instead of a copy of it.
 - `tools/analyze_expert_access.py`: groups the `EA_RUN` lines by mode, tile,
   pattern and cache state, reports median copy/compute/total time and effective
-  MB/s, and flags under-sampled warm groups.
+  MB/s, and flags under-sampled no-evict groups.
 - `EA_COLD_EVERY`: `#ifndef`-guarded, default `0`. With `EA_COLD_EVERY 1` the
   D-cache is evicted before every run, so `EA_RUNS = 10` yields ten independent
-  cold observations instead of one cold and nine warm ones. Every `EA_RUN`
+  cold observations instead of one cold and nine no-evict ones. Every `EA_RUN`
   record now carries `cold=1`/`cold=0` so the analyser groups correctly under
   either policy.
 - `docs/EXPERT-ACCESS-BENCH.md`: geometry, modes, the two-capture procedure
@@ -40,6 +40,15 @@ no released binary, log or result is affected.
 - `model_lib.h`: `MODEL_CACHE_SLOTS` is `#ifndef`-guarded so the no-cache
   configuration can be built by setting it to `0` (the procedure edits the
   header). Default is still 3.
+- Cache-state wording: "warm" is now "no-evict" in the analyser and docs. The
+  634 KB working set does not fit the 64 KB D-cache, so repeated execution
+  without an eviction sweep is not cache-resident.
+
+### Fixed
+
+- `expert_access_bench.c`: the eviction buffer is `memset` to `0xA5` after the
+  allocation check. `heap_caps_malloc()` does not zero memory, and the sweep
+  read it before any write.
 
 ### Not changed
 

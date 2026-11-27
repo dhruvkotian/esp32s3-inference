@@ -154,8 +154,11 @@ cd firmware && idf.py build
 
 ## Reading the output
 
-The analyser separates **cold** (D-cache evicted before the run) from **warm**
-(no eviction) because pooling them hides the difference. The firmware emits the
+The analyser separates **cold** (D-cache evicted before the run) from
+**no-evict** (no eviction sweep) because pooling them hides the difference.
+"no-evict" is not "warm": the 634 KB working set is far larger than the 64 KB
+cache, so the expert is never fully cache-resident. The label only records that
+no sweep was performed. The firmware emits the
 state on every record (`cold=1` / `cold=0`), so the grouping stays correct even
 when the eviction policy changes. Compare modes on `total_us`, not on
 `comp_us`: for A that is copy plus compute, for B it is the direct compute
@@ -173,18 +176,18 @@ alone.
 Mode B must beat Mode A on **total elapsed time**, not merely on compute time.
 `T_A = T_copy + T_compute`, `T_B = T_direct_compute`.
 
-### Sampling cold and warm
+### Sampling cold and no-evict
 
-By default only run 0 is cold, so `EA_RUNS = 10` gives **one cold and nine warm**
-observations. That is not ten independent cold runs, and it must not be read as
-one. Two settings control this, both `#ifndef`-guarded:
+By default only run 0 is cold, so `EA_RUNS = 10` gives **one cold and nine
+no-evict** observations. That is not ten independent cold runs, and it must not
+be read as one. Two settings control this, both `#ifndef`-guarded:
 
 | Setting | Effect |
 |---|---|
 | `EA_RUNS` (default 3) | Repeats per configuration |
 | `EA_COLD_EVERY` (default 0) | `1` evicts the D-cache before every run |
 
-For a stable **warm** comparison, raise only `EA_RUNS`. For a stable **cold**
+For a stable **no-evict** comparison, raise only `EA_RUNS`. For a stable **cold**
 comparison, set `EA_COLD_EVERY 1` and raise `EA_RUNS`; every run is then an
 independent cold observation, and the analyser reports them all as `cold`:
 
@@ -229,7 +232,7 @@ These are predictions to check, not results.
 | Output | What it tells us |
 |---|---|
 | `logs/expert_access.log` | Complete raw A/B/C capture |
-| `/tmp/ea.csv` | Grouped cold/warm timings |
+| `/tmp/ea.csv` | Grouped cold/no-evict timings |
 | `EA_ACC`, `EA_EQUIV` | Arithmetic consistency, per matrix |
 | `EA_CTRL64` | Stride-64 kernel control |
 | `EA_GEOM` | Actual tensor sizes used |
